@@ -39,6 +39,12 @@ archive/
 # Log files
 *.log
 
+# Profiling files
+*.nsys-rep
+*.qdrep
+*.sqlite
+*_report.txt
+
 # Generated documentation
 docs/_build/
 *.pdf

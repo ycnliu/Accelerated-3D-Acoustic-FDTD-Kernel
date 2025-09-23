@@ -49,6 +49,19 @@ make clean
 make help
 ```
 
+### Profiling with NSYS
+```bash
+# Profile all implementations (requires nvhpc module)
+module load nvhpc
+make profile-kernels  # Lightweight kernel profiling
+make profile         # Full timeline profiling
+make profile-report  # Generate text report
+
+# View profiling results
+cat fdtd_profile_report.txt
+# Or open .nsys-rep files in NVIDIA Nsight Systems GUI
+```
+
 ### Alternative Testing
 ```bash
 # Run test script directly
@@ -62,11 +75,18 @@ export LD_LIBRARY_PATH=/path/to/cuda/lib64:$LD_LIBRARY_PATH
 ## 🎯 Performance Results
 
 Latest validation results on 64³ grid:
-- **CUDA_Baseline**: 27.3 GFLOPS, 0.004s
-- **Mixed_Precision**: 112.9 GFLOPS, 0.001s
-- **Temporal_Blocking**: 26.3 GFLOPS, 0.004s
+- **CUDA_Baseline**: 19.9 GFLOPS, 0.005s
+- **Mixed_Precision**: 105.2 GFLOPS, 0.001s
+- **Temporal_Blocking**: 18.5 GFLOPS, 0.005s
 
 All implementations pass validation with zero numerical errors.
+
+### Profiling Results
+NSYS kernel profiling shows:
+- **wave_kernel_temporal_blocking_1step**: 31.8% execution time
+- **wave_kernel_mixed_precision**: 31.5% execution time
+- **wave_kernel (baseline)**: 30.7% execution time
+- Excellent load balancing across implementations
 
 ## 🔧 Implementation Details
 
