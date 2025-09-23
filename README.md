@@ -1,11 +1,11 @@
 # Accelerated 3D Acoustic FDTD Kernels
 
-High-performance CUDA implementations of 3D acoustic Finite-Difference Time-Domain (FDTD) solvers with comprehensive validation and optimization.
+High-performance CUDA implementations of 3D acoustic Finite-Difference Time-Domain (FDTD) solvers with streamlined validation.
 
 ## 🚀 Features
 
 - **Multiple CUDA Implementations**: Baseline, mixed-precision, temporal blocking
-- **Comprehensive Validation**: Automated testing and performance benchmarking
+- **Single Validation Executable**: All testing in one streamlined tool
 - **Production-Ready**: Robust error handling and memory management
 - **Optimized Performance**: Memory bandwidth optimizations and cooperative loading
 
@@ -18,37 +18,43 @@ High-performance CUDA implementations of 3D acoustic Finite-Difference Time-Doma
 - `fdtd_optimized.cu` - Additional optimized variant
 
 ### Validation & Testing
-- `quick_test.cpp` - Single executable for validating all implementations
+- `quick_test.cpp` - **Single executable** for validating all implementations
 - `run_test.sh` - Convenient test runner script
-- `comprehensive_benchmark.cpp` - Detailed performance analysis
-- `solver_validation.cpp` - Mathematical validation framework
 
 ### Build System
-- `Makefile` - Complete build configuration
+- `Makefile` - Streamlined build configuration
 - `fdtd_common.h` - Shared definitions and structures
 
 ## 🛠 Quick Start
 
 ### Prerequisites
 - CUDA 11.8+ with compute capability 7.0+
-- GCC 8+ with C++14 support
+- GCC with C++14 support
 - Make build system
 
-### Building
+### Building & Testing
 ```bash
-# Build all implementations
-make all
+# Build and test in one command
+make && make test
 
-# Build specific target
-make quick_test
+# Or build separately
+make all           # Builds quick_test executable
+make test          # Runs validation tests
+make test-script   # Runs via shell script
+
+# Clean build artifacts
+make clean
+
+# Show all options
+make help
 ```
 
-### Running Validation
+### Alternative Testing
 ```bash
-# Quick validation of all kernels
+# Run test script directly
 ./run_test.sh
 
-# Or run directly
+# Run executable directly (with proper library path)
 export LD_LIBRARY_PATH=/path/to/cuda/lib64:$LD_LIBRARY_PATH
 ./quick_test
 ```
@@ -82,7 +88,7 @@ All implementations pass validation with zero numerical errors.
 
 ## 📊 Validation Framework
 
-Comprehensive testing includes:
+The single `quick_test` executable provides:
 - ✅ Compilation validation
 - ✅ Runtime execution testing
 - ✅ Numerical accuracy verification
@@ -92,7 +98,6 @@ Comprehensive testing includes:
 ## 🐛 Known Issues
 
 - `fdtd_optimized.cu` has memory alignment issues (under investigation)
-- OpenACC implementation requires specific compiler flags
 
 ## 📝 Development
 
@@ -119,3 +124,4 @@ Academic/Research Use - See individual file headers for specific licensing terms
 ---
 
 **Status**: ✅ All CUDA implementations validated and working correctly
+**Testing**: ✅ Single streamlined validation executable

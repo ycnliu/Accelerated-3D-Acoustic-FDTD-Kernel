@@ -1,117 +1,65 @@
-NVHPC_PATH = /global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11
-NVCC = $(NVHPC_PATH)/compilers/bin/nvcc
-NVC = $(NVHPC_PATH)/compilers/bin/nvc++
+# Streamlined Makefile for 3D Acoustic FDTD CUDA Kernels
+# Single validation executable for all implementations
+
+# Compiler paths (adjust for your system)
+CUDA_PATH = /global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-10.5.0/cuda-11.8.0-ky3sqqqaat26kya2ceeszhk4pcyd7owp
+NVCC = $(CUDA_PATH)/bin/nvcc
 CXX = g++
 
 # Compiler flags
-NVCC_FLAGS = -O3 -arch=sm_75 -std=c++11 -lineinfo
-CXX_FLAGS = -O3 -std=c++11 -fopenmp
+NVCC_FLAGS = -O3 --std=c++14 -lineinfo
+CXX_FLAGS = -O3 -std=c++14
 
-# Include paths
-INCLUDES = -I$(NVHPC_PATH)/cuda/include
+# Include and library paths
+INCLUDES = -I. -I$(CUDA_PATH)/include
+LDFLAGS = -L$(CUDA_PATH)/lib64
+LIBS = -lcudart -lm
 
-# Library paths and libraries
-LDFLAGS = -L$(NVHPC_PATH)/cuda/lib64
-LIBS = -lcuda -lcudart
+# CUDA source files
+CUDA_SOURCES = fdtd_cuda.cu fdtd_mixed_precision_simple.cu fdtd_temporal_blocking.cu
+CUDA_OBJECTS = $(CUDA_SOURCES:.cu=.o)
 
-# Source files
-CUDA_SRC = fdtd_cuda.cu
-CPP_SRC = benchmark.cpp
-OPENACC_SRC = fdtd_openacc_dummy.cpp
+# Main targets
+.PHONY: all test clean help
 
-# Object files
-CUDA_OBJ = fdtd_cuda.o
-CPP_OBJ = benchmark.o
-OPENACC_OBJ = fdtd_openacc_dummy.o
+all: quick_test
 
-# Targets
-all: benchmark comprehensive_benchmark validation_suite
+# Single validation executable
+quick_test: quick_test.o $(CUDA_OBJECTS)
+	$(CXX) $(CXX_FLAGS) $(INCLUDES) $(LDFLAGS) -o $@ $^ $(LIBS)
 
-# Validation targets
-validation_suite: simple_validation_test cuda_openacc_validator
-
-# Standard CUDA implementation
-benchmark: $(CUDA_OBJ) $(CPP_OBJ) $(OPENACC_OBJ)
-	$(NVCC) $(NVCC_FLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
-
-# Compile CUDA source
-$(CUDA_OBJ): $(CUDA_SRC)
-	$(NVCC) $(NVCC_FLAGS) $(INCLUDES) -c $< -o $@
-
-# Compile C++ benchmark
-$(CPP_OBJ): $(CPP_SRC)
+# Build quick_test object
+quick_test.o: quick_test.cpp
 	$(CXX) $(CXX_FLAGS) $(INCLUDES) -c $< -o $@
 
-# Compile OpenACC source (dummy implementation)
-$(OPENACC_OBJ): $(OPENACC_SRC)
-	$(CXX) $(CXX_FLAGS) $(INCLUDES) -c $< -o $@
-
-# Comprehensive benchmark with mixed precision - use nvc++ for linking to get OpenACC libs
-comprehensive_benchmark: fdtd_cuda.o fdtd_mixed_precision_simple.o fdtd_optimized.o fdtd_openacc.o fdtd_temporal_blocking.o comprehensive_benchmark.o
-	$(NVC) -acc -gpu=cc75 $(LDFLAGS) -o $@ $^ $(LIBS)
-
-fdtd_temporal_blocking.o: fdtd_temporal_blocking.cu
+# Build CUDA objects
+%.o: %.cu
 	$(NVCC) $(NVCC_FLAGS) $(INCLUDES) -c $< -o $@
 
-fdtd_mixed_precision_simple.o: fdtd_mixed_precision_simple.cu
-	$(NVCC) $(NVCC_FLAGS) $(INCLUDES) -c $< -o $@
 
-fdtd_optimized.o: fdtd_optimized.cu
-	$(NVCC) $(NVCC_FLAGS) $(INCLUDES) -c $< -o $@
+# Run validation test
+test: quick_test
+	@echo "=== Running CUDA Validation Test ==="
+	@export LD_LIBRARY_PATH=$(CUDA_PATH)/lib64:$$LD_LIBRARY_PATH && ./quick_test
 
-fdtd_openacc.o: fdtd_openacc.cpp
-	$(NVC) -acc -gpu=cc75 -O3 -c $< -o $@
+# Quick test via script
+test-script: quick_test
+	@echo "=== Running Test Script ==="
+	./run_test.sh
 
-comprehensive_benchmark.o: comprehensive_benchmark.cpp
-	$(CXX) $(CXX_FLAGS) $(INCLUDES) -c $< -o $@
-
-# Legacy tensor version (if needed)
-tensor_benchmark: fdtd_tensor.o benchmark_tensor.o
-	$(NVCC) $(NVCC_FLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
-
-fdtd_tensor.o: fdtd_tensor.cu
-	$(NVCC) $(NVCC_FLAGS) $(INCLUDES) -c $< -o $@
-
-# Simple validation test (no solver dependency)
-simple_validation_test: simple_validation_test.o
-	$(CXX) $(CXX_FLAGS) $(LDFLAGS) -o $@ $^
-
-simple_validation_test.o: simple_validation_test.cpp solver_validation.cpp
-	$(CXX) $(CXX_FLAGS) $(INCLUDES) -c simple_validation_test.cpp -o $@
-
-# Validation driver executable (full integration)
-validation_driver: validation_driver.o fdtd_cuda.o fdtd_openacc.o
-	$(NVC) -acc -gpu=cc75 $(LDFLAGS) -o $@ $^ $(LIBS)
-
-validation_driver.o: validation_driver.cpp solver_validation.cpp fdtd_common.h
-	$(CXX) $(CXX_FLAGS) $(INCLUDES) -c validation_driver.cpp -o $@
-
-# CUDA vs OpenACC validator
-cuda_openacc_validator: cuda_openacc_validator.o
-	$(CXX) $(CXX_FLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
-
-cuda_openacc_validator.o: cuda_openacc_validator.cpp
-	$(CXX) $(CXX_FLAGS) $(INCLUDES) -c $< -o $@
-
-# Run validation suite
-validate: validation_suite
-	@echo "Running validation suite..."
-	./simple_validation_test
-	./cuda_openacc_validator default 64 64 64 100
-	@echo "Validation complete. Check validation reports for results."
-
-# Quick validation (faster subset)
-validate-quick: validation_suite
-	@echo "Running quick validation tests..."
-	./simple_validation_test
-	@echo "Quick validation complete."
-
-# Clean
+# Clean build artifacts
 clean:
-	rm -f *.o benchmark tensor_benchmark validation_driver cuda_openacc_validator simple_validation_test *.csv *.png *.pdf *.md ncu_report.csv validation_report.md
+	rm -f *.o quick_test
 
-# Install dependencies (if needed)
-install-deps:
-	# This would install CUDA, cuBLAS, etc. if not already available
-
-.PHONY: all clean install-deps
+# Show help
+help:
+	@echo "Available targets:"
+	@echo "  all         - Build quick_test (default)"
+	@echo "  quick_test  - Build single validation executable"
+	@echo "  test        - Run validation tests"
+	@echo "  test-script - Run via test script"
+	@echo "  clean       - Remove build artifacts"
+	@echo "  help        - Show this help"
+	@echo ""
+	@echo "Quick start:"
+	@echo "  make && make test"
