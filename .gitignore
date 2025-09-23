@@ -1,0 +1,44 @@
+# Compiled objects and executables
+*.o
+*.exe
+comprehensive_benchmark
+test_cuda_kernels
+quick_test
+
+# Build artifacts
+*.a
+*.so
+*.dylib
+
+# Data files
+*.csv
+*.dat
+*.bin
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+
+# Claude workspace
+.claude/
+
+# Archive directory
+archive/
+
+# Log files
+*.log
+
+# Generated documentation
+docs/_build/
+*.pdf
