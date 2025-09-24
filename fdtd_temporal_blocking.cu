@@ -34,8 +34,10 @@ struct profiler {
     double section1{};
     double cuda_malloc{};
     double cuda_memcpy{};
+    double cuda_memcpy_h2d{};
+    double cuda_memcpy_d2h{};
     double kernel_time{};
-    double conversion_time{};  // required by CUDA/OpenACC impls
+    double conversion_time{};
 };
 
 // 3D indexing macros for u (4D: time, x, y, z)

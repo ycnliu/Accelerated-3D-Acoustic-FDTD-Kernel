@@ -1,96 +1,75 @@
-# Streamlined Makefile for 3D Acoustic FDTD CUDA Kernels
-# Single validation executable for all implementations
+# ===============================
+# Makefile: FDTD Benchmark Suite
+# ===============================
 
-# Compiler paths (adjust for your system)
-CUDA_PATH = /global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-10.5.0/cuda-11.8.0-ky3sqqqaat26kya2ceeszhk4pcyd7owp
-NVCC = $(CUDA_PATH)/bin/nvcc
-NSYS = $(CUDA_PATH)/bin/nsys
-CXX = g++
+# --- Paths ---
+CUDA_PATH ?= /global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-10.5.0/cuda-11.8.0-ky3sqqqaat26kya2ceeszhk4pcyd7owp
+NVCC      ?= $(CUDA_PATH)/bin/nvcc
+NSYS      ?= $(CUDA_PATH)/bin/nsys
+CXX       ?= g++
+NVCXX     ?= nvc++
 
-# Compiler flags
-NVCC_FLAGS = -O3 --std=c++14 -lineinfo
-CXX_FLAGS = -O3 -std=c++14
+# --- Flags ---
+NVCC_FLAGS ?= -O3 --std=c++14 -lineinfo
+CXX_FLAGS  ?= -O3 -std=c++14 -fopenmp
+ACC_FLAGS  ?= -acc -O3 -std=c++14
 
-# Include and library paths
-INCLUDES = -I. -I$(CUDA_PATH)/include
-LDFLAGS = -L$(CUDA_PATH)/lib64
-LIBS = -lcudart -lm
+INCLUDES   ?= -I. -I$(CUDA_PATH)/include
+LDFLAGS    ?= -L$(CUDA_PATH)/lib64
+LIBS       ?= -lcudart -lm -lgomp
 
-# CUDA source files
-CUDA_SOURCES = fdtd_cuda.cu fdtd_mixed_precision_simple.cu fdtd_temporal_blocking.cu
-CUDA_OBJECTS = $(CUDA_SOURCES:.cu=.o)
+# --- Sources / Objects ---
+CUDA_SOURCES := fdtd_cuda.cu fdtd_mixed_precision_simple.cu fdtd_temporal_blocking.cu fdtd_optimized_advanced.cu
+CUDA_OBJECTS := $(CUDA_SOURCES:.cu=.o)
 
-# Main targets
-.PHONY: all test clean help profile profile-kernels profile-report
+OPENACC_SRC  := fdtd_openacc.cpp
+OPENACC_OBJ  := $(OPENACC_SRC:.cpp=.o)
 
-all: quick_test
+BENCHMARK_MAIN := fdtd_benchmark.cpp
+BENCHMARK_OBJ  := fdtd_benchmark.o
 
-# Single validation executable
-quick_test: quick_test.o $(CUDA_OBJECTS)
-	$(CXX) $(CXX_FLAGS) $(INCLUDES) $(LDFLAGS) -o $@ $^ $(LIBS)
+# --- Phony targets ---
+.PHONY: all clean fdtd_benchmark help
 
-# Build quick_test object
-quick_test.o: quick_test.cpp
-	$(CXX) $(CXX_FLAGS) $(INCLUDES) -c $< -o $@
+# Default build
+all: fdtd_benchmark
 
-# Build CUDA objects
+# Complete benchmark (CUDA + OpenACC)
+fdtd_benchmark: $(BENCHMARK_OBJ) $(CUDA_OBJECTS) $(OPENACC_OBJ)
+	$(NVCXX) $(ACC_FLAGS) $(INCLUDES) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+# --- Object rules ---
+# Benchmark compiled with OpenACC support
+$(BENCHMARK_OBJ): $(BENCHMARK_MAIN)
+	$(NVCXX) $(ACC_FLAGS) $(INCLUDES) -DUSE_OPENACC -c $< -o $@
+
+# CUDA objects
 %.o: %.cu
 	$(NVCC) $(NVCC_FLAGS) $(INCLUDES) -c $< -o $@
 
+# OpenACC object
+$(OPENACC_OBJ): $(OPENACC_SRC)
+	$(NVCXX) $(ACC_FLAGS) $(INCLUDES) -c $< -o $@
 
-# Run validation test
-test: quick_test
-	@echo "=== Running CUDA Validation Test ==="
-	@export LD_LIBRARY_PATH=$(CUDA_PATH)/lib64:$$LD_LIBRARY_PATH && ./quick_test
-
-# Quick test via script
-test-script: quick_test
-	@echo "=== Running Test Script ==="
-	./run_test.sh
-
-# Profile with nsys (full timeline)
-profile: quick_test
-	@echo "=== Running NSYS Profiling ==="
-	@export LD_LIBRARY_PATH=$(CUDA_PATH)/lib64:$$LD_LIBRARY_PATH && \
-	$(NSYS) profile --trace=cuda,nvtx --output=fdtd_profile --force-overwrite=true ./quick_test
-	@echo "✓ Profile saved as fdtd_profile.qdrep"
-
-# Profile kernels only (lightweight)
-profile-kernels: quick_test
-	@echo "=== Running NSYS Kernel Profiling ==="
-	@export LD_LIBRARY_PATH=$(CUDA_PATH)/lib64:$$LD_LIBRARY_PATH && \
-	$(NSYS) profile --trace=cuda --stats=true --output=fdtd_kernels --force-overwrite=true ./quick_test
-	@echo "✓ Kernel profile saved as fdtd_kernels.qdrep"
-
-# Generate text report from profile
-profile-report: fdtd_kernels.nsys-rep
-	@echo "=== Generating Profile Report ==="
-	$(NSYS) stats --report gputrace,gpukernsum,gpumemtimesum,gpumemsum fdtd_kernels.nsys-rep > fdtd_profile_report.txt
-	@echo "✓ Text report saved as fdtd_profile_report.txt"
-
-# Clean build artifacts
+# --- Cleaning ---
 clean:
-	rm -f *.o quick_test
+	rm -f *.o fdtd_benchmark
 
-# Clean all artifacts including profiles
 clean-all: clean
-	rm -f *.qdrep *.sqlite *.txt
+	rm -f *.qdrep *.nsys-rep *.sqlite *.txt *.csv
 
-# Show help
+# --- Help ---
 help:
-	@echo "Available targets:"
-	@echo "  all            - Build quick_test (default)"
-	@echo "  quick_test     - Build single validation executable"
-	@echo "  test           - Run validation tests"
-	@echo "  test-script    - Run via test script"
-	@echo "  profile        - Run nsys profiling (full timeline)"
-	@echo "  profile-kernels- Run nsys profiling (kernels only)"
-	@echo "  profile-report - Generate text report from profile"
-	@echo "  clean          - Remove build artifacts"
-	@echo "  clean-all      - Remove all artifacts including profiles"
-	@echo "  help           - Show this help"
+	@echo "FDTD Benchmark Suite"
+	@echo "Targets:"
+	@echo "  all            - Build complete benchmark (CUDA + OpenACC)"
+	@echo "  fdtd_benchmark - Build complete benchmark"
+	@echo "  clean          - Clean build artifacts"
+	@echo "  clean-all      - Clean all artifacts including profiles/results"
 	@echo ""
-	@echo "Quick start:"
-	@echo "  make && make test"
-	@echo "  make profile        # Profile all implementations"
-	@echo "  make profile-report # Generate readable report"
+	@echo "Usage:"
+	@echo "  make           - Build benchmark"
+	@echo "  ./fdtd_benchmark - Run comprehensive 4-GPU benchmark"
+	@echo ""
+	@echo "Requirements:"
+	@echo "  module load nvhpc  (for OpenACC support)"

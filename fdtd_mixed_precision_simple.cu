@@ -34,6 +34,8 @@ struct profiler {
     double section1;
     double cuda_malloc;
     double cuda_memcpy;
+    double cuda_memcpy_h2d;
+    double cuda_memcpy_d2h;
     double kernel_time;
     double conversion_time;
 };
