@@ -7,8 +7,8 @@ NVC = $(NVHPC_PATH)/nvc++
 NVCC = $(NVHPC_PATH)/nvcc
 
 # Compiler flags
-NVHPC_FLAGS = -acc -O3 -std=c++14 -I.
-CUDA_FLAGS = -O3 --std=c++14 -arch=sm_75 -lineinfo -Xptxas=-O3
+NVHPC_FLAGS = -acc -O3 -std=c++14 -I. -gpu=cc75
+CUDA_FLAGS = -O3 --std=c++14 -arch=sm_75 -lineinfo -DTY=8 -DTZ=32 -DXCHUNK=64 -Xptxas=-O3,-dlcm=ca -use_fast_math
 
 # Files
 TARGET = fdtd_benchmark
