@@ -1,129 +1,89 @@
-# OpenACC/CUDA FDTD Makefile
-# Compiler paths
+# FDTD Unified Benchmark Makefile
+# Builds single executable that can run any implementation
+
+# Compiler paths (adjust for your system)
 NVHPC_PATH = /global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11/compilers/bin
 NVC = $(NVHPC_PATH)/nvc++
 NVCC = $(NVHPC_PATH)/nvcc
 
 # Compiler flags
 NVHPC_FLAGS = -acc -O3 -std=c++14 -I.
-CUDA_FLAGS = -O3 --std=c++14 -arch=sm_75 -lineinfo -Xptxas=-O3 -DTY=8 -DTZ=32 -DXCHUNK=64
+CUDA_FLAGS = -O3 --std=c++14 -arch=sm_75 -lineinfo -Xptxas=-O3
 
-# Targets
-TARGET_UNIFIED = fdtd_benchmark
-TARGET_ACC = fdtd_openacc
-TARGET_CUDA = fdtd_cuda
-TARGET_CUDA_OPT = fdtd_cuda_optimized
-OBJS_ACC = openacc.o
-OBJS_CUDA = cuda.o
-OBJS_CUDA_OPT = cuda_optimized.o
+# Files
+TARGET = fdtd_benchmark
 MAIN = main.cpp
+OPENACC_SRC = openacc.cpp
+CUDA_SRC = cuda.cu
+CUDA_OPT_SRC = cuda_optimized.cu
 
-# Default target (OpenACC version)
-all: $(TARGET_UNIFIED)
+# Default target - OpenACC version (most portable)
+all: openacc
 
-# All implementations
-all-impl: fdtd_openacc_exe fdtd_cuda_exe fdtd_cuda_opt_exe
+# Build OpenACC version
+openacc: $(MAIN) $(OPENACC_SRC)
+	$(NVC) $(NVHPC_FLAGS) -o $(TARGET) $(MAIN) $(OPENACC_SRC) -lm
+	@echo "Built OpenACC version. Usage: ./$(TARGET) [openacc]"
 
-# Unified benchmark executable (OpenACC only for now)
-$(TARGET_UNIFIED): $(OBJS_ACC) $(MAIN)
-	$(NVC) $(NVHPC_FLAGS) -o $@ $(MAIN) $(OBJS_ACC) -lm
+# Build CUDA version
+cuda: $(MAIN) $(CUDA_SRC)
+	$(NVCC) $(CUDA_FLAGS) -o $(TARGET) $(MAIN) $(CUDA_SRC)
+	@echo "Built CUDA version. Usage: ./$(TARGET) [cuda]"
 
-# OpenACC executable
-$(TARGET_ACC): $(OBJS_ACC) $(MAIN)
-	$(NVC) $(NVHPC_FLAGS) -o $@ $(MAIN) $(OBJS_ACC) -lm
+# Build CUDA optimized version
+cuda-opt: $(MAIN) $(CUDA_OPT_SRC)
+	$(NVCC) $(CUDA_FLAGS) -o $(TARGET) $(MAIN) $(CUDA_OPT_SRC)
+	@echo "Built CUDA optimized version. Usage: ./$(TARGET) [cuda_optimized]"
 
-# CUDA executable
-$(TARGET_CUDA): $(OBJS_CUDA) main_cuda.cpp
-	$(NVCC) $(CUDA_FLAGS) -o $@ main_cuda.cpp $(OBJS_CUDA)
+# Run benchmarks
+run: $(TARGET)
+	./$(TARGET)
 
-# OpenACC object file
-openacc.o: openacc.cpp
-	$(NVC) $(NVHPC_FLAGS) -c -o $@ $<
+run-openacc: openacc
+	./$(TARGET) openacc
 
-# CUDA object file
-cuda.o: cuda.cu
-	$(NVCC) $(CUDA_FLAGS) -c -o $@ $<
+run-cuda: cuda
+	./$(TARGET) cuda
 
-# CUDA optimized object file
-cuda_optimized.o: cuda_optimized.cu
-	$(NVCC) $(CUDA_FLAGS) -c -o $@ $<
+run-cuda-opt: cuda-opt
+	./$(TARGET) cuda_optimized
 
-# Individual executables for each implementation
-fdtd_openacc_exe: $(OBJS_ACC) $(MAIN)
-	$(NVC) $(NVHPC_FLAGS) -o $@ $(MAIN) $(OBJS_ACC) -lm
-
-fdtd_cuda_exe: $(OBJS_CUDA) $(MAIN)
-	$(NVCC) $(CUDA_FLAGS) -o $@ $(MAIN) $(OBJS_CUDA)
-
-fdtd_cuda_opt_exe: $(OBJS_CUDA_OPT) $(MAIN)
-	$(NVCC) $(CUDA_FLAGS) -o $@ $(MAIN) $(OBJS_CUDA_OPT)
-
-# Run programs
-run: $(TARGET_UNIFIED)
-	./$(TARGET_UNIFIED)
-
-run-acc: $(TARGET_UNIFIED)
-	./$(TARGET_UNIFIED) openacc
-
-run-cuda: $(TARGET_UNIFIED)
-	./$(TARGET_UNIFIED) cuda
-
-run-both: run
-
-run-old-acc: $(TARGET_ACC)
-	./$(TARGET_ACC)
-
-run-old-cuda: $(TARGET_CUDA)
-	./$(TARGET_CUDA)
-
-# Run specific implementations
-run-openacc-only: fdtd_openacc_exe
-	./fdtd_openacc_exe openacc
-
-run-cuda-only: fdtd_cuda_exe
-	./fdtd_cuda_exe cuda
-
-run-cuda-opt-only: fdtd_cuda_opt_exe
-	./fdtd_cuda_opt_exe cuda_optimized
-
-run-all-impl: fdtd_openacc_exe fdtd_cuda_exe fdtd_cuda_opt_exe
-	@echo "=== Running All Implementations ==="
-	./fdtd_openacc_exe openacc
-	./fdtd_cuda_exe cuda
-	./fdtd_cuda_opt_exe cuda_optimized
-
-# Clean up
-clean:
-	rm -f *.o $(TARGET_UNIFIED) $(TARGET_ACC) $(TARGET_CUDA) $(TARGET_CUDA_OPT) benchmark.csv main_cuda.cpp fdtd_openacc_exe fdtd_cuda_exe fdtd_cuda_opt_exe
-
-# Rebuild everything
-rebuild: clean all
-
-# Show benchmark results
+# Show results
 show-results:
 	@echo "=== Benchmark Results ==="
 	@if [ -f benchmark.csv ]; then \
-		echo "Method,Total_Time(s),Section0_Time(s),Section1_Time(s),GFLOPS,NX,NY,NZ,Timesteps"; \
-		tail -n +2 benchmark.csv; \
+		head -1 benchmark.csv; \
+		tail -n +2 benchmark.csv | sort -t, -k1,1; \
 	else \
 		echo "No benchmark.csv found. Run 'make run' first."; \
 	fi
 
+# Clean up
+clean:
+	rm -f *.o $(TARGET) benchmark.csv
+
 # Help
 help:
-	@echo "Available targets:"
-	@echo "  all               - Build unified benchmark executable (default - OpenACC)"
-	@echo "  all-impl          - Build all individual implementation executables"
-	@echo "  run               - Run unified benchmark (OpenACC by default)"
-	@echo "  run-acc           - Run OpenACC benchmark via unified executable"
-	@echo "  run-cuda          - Run CUDA benchmark via unified executable"
-	@echo "  run-openacc-only  - Run OpenACC-only executable"
-	@echo "  run-cuda-only     - Run CUDA-only executable"
-	@echo "  run-cuda-opt-only - Run optimized CUDA-only executable"
-	@echo "  run-all-impl      - Run all three implementations"
-	@echo "  clean             - Remove all generated files"
-	@echo "  rebuild           - Clean and build"
-	@echo "  show-results      - Display benchmark results from CSV"
-	@echo "  help              - Show this help message"
+	@echo "FDTD Unified Benchmark Build System"
+	@echo "=================================="
+	@echo ""
+	@echo "Build targets:"
+	@echo "  all (default)  - Build OpenACC version"
+	@echo "  openacc        - Build OpenACC version"
+	@echo "  cuda           - Build CUDA version"
+	@echo "  cuda-opt       - Build CUDA optimized version"
+	@echo ""
+	@echo "Run targets:"
+	@echo "  run            - Run current executable"
+	@echo "  run-openacc    - Build and run OpenACC"
+	@echo "  run-cuda       - Build and run CUDA"
+	@echo "  run-cuda-opt   - Build and run CUDA optimized"
+	@echo ""
+	@echo "Utility:"
+	@echo "  show-results   - Display benchmark CSV results"
+	@echo "  clean          - Remove generated files"
+	@echo "  help           - Show this help"
+	@echo ""
+	@echo "Note: Only one implementation at a time. Rebuild to switch."
 
-.PHONY: all run clean rebuild show-results help
+.PHONY: all openacc cuda cuda-opt run run-openacc run-cuda run-cuda-opt clean show-results help
