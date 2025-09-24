@@ -4,6 +4,12 @@
 comprehensive_benchmark
 test_cuda_kernels
 quick_test
+fdtd_benchmark
+fdtd_openacc
+fdtd_cuda
+fdtd_cuda_optimized
+fdtd_*_exe
+main_cuda.cpp
 
 # Build artifacts
 *.a
