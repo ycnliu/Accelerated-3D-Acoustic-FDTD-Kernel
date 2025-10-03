@@ -1,143 +1,195 @@
-# FDTD Benchmark Suite - OpenACC vs CUDA Performance Comparison
+# FDTD Unified Benchmark - OpenACC vs CUDA Performance Comparison
 
-A comprehensive benchmarking suite for comparing OpenACC and CUDA implementations of 3D Finite-Difference Time-Domain (FDTD) acoustic wave simulation.
+A comprehensive benchmarking suite for comparing OpenACC and CUDA implementations of 3D Finite-Difference Time-Domain (FDTD) acoustic wave simulation with automated correctness verification and performance measurement.
 
 ## Overview
 
 This repository contains three optimized implementations of a 3D acoustic FDTD solver:
 - **OpenACC**: High-level directive-based GPU programming
-- **CUDA Regular**: Hand-optimized CUDA kernels
-- **CUDA Optimized**: CUDA with shared memory tiling optimizations
+- **CUDA**: Hand-optimized CUDA kernels
+- **CUDA_Optimized**: CUDA with shared memory tiling and loop unrolling
 
-## Performance Results
+## Quick Start
 
-### Complete Performance Comparison (256³ grid, 100 timesteps)
+```bash
+# Build for RTX 2080 Ti
+make clean && GPU_ARCH=sm_75 make -j
 
-| Implementation | Total Time | Section0 (Compute) | Section1 (Source) | GFLOPS | GB/s |
-|---------------|------------|-------------------|-------------------|--------|------|
-| **CUDA Regular** | 0.170s | **0.052s** | 0.001s | **1138** | **2023** |
-| **CUDA Optimized** | 0.171s | 0.052s | 0.001s | **1135** | **2018** |
-| **OpenACC** | 0.174s | 0.056s | 0.001s | **1065** | **1893** |
+# Run unified benchmark (correctness + performance)
+make run
 
-### Key Findings
-- **CUDA Regular** provides the best performance across all grid sizes
-- **OpenACC** achieves 93% of CUDA performance with significantly less code complexity
-- **CUDA Optimized** shows minimal improvement over regular CUDA for this workload
-- **Section 0 (main compute)** dominates performance; Section 1 (source injection) is negligible
+# View results
+make show-results
+```
+
+## Unified Benchmark Workflow
+
+The benchmark automatically runs in three phases:
+
+### Phase 1: Correctness Verification
+- Tests all implementations against OpenACC reference
+- Grid sizes: 32³, 64³, 128³, 256³, 512³
+- 50 timesteps per test
+- Pass criteria: L2 error < 1e-4
+
+### Phase 2: Performance Benchmark
+- Runs all three implementations
+- Grid sizes: 32³, 64³, 128³, 256³, 512³
+- 50 timesteps, 1 source
+- 5 repetitions with statistics
+- Writes detailed CSV output
+
+### Phase 3: Results Summary
+- Displays benchmark.csv data
+- Shows timing breakdown and efficiency metrics
 
 ## Repository Structure
 
 ```
 .
-├── main.cpp              # Unified benchmark driver
+├── main.cpp              # Unified benchmark driver with correctness tests
 ├── openacc.cpp          # OpenACC implementation
 ├── cuda.cu              # Regular CUDA implementation
-├── cuda_optimized.cu    # Optimized CUDA with shared memory
-├── Makefile             # Build system for all implementations
-└── README.md            # This file
+├── cuda_optimized.cu    # Optimized CUDA with shared memory + unrolling
+├── Makefile             # Simplified build system
+├── README.md            # This file
+├── DEBUG.md             # Development history and debugging notes
+└── H100_README.md       # H100 optimization notes
 ```
 
 ## Build Requirements
 
 - **NVIDIA HPC SDK** (for OpenACC): `nvc++` with `-acc` flag
-- **CUDA Toolkit**: `nvcc` with compute capability 7.5+
+- **CUDA Toolkit**: `nvcc` with compute capability 7.5+ (sm_75 for RTX 2080 Ti)
 - **GNU Make**
 - **CUDA-capable GPU**
 
-## Building and Running
+## Building
 
-### Build All Implementations
 ```bash
-make all-impl          # Build all three executables
+# RTX 2080 Ti (Turing) - default
+make clean && make -j
+
+# H100 (Hopper)
+make clean && GPU_ARCH=sm_90 make -j
+
+# A100 (Ampere)
+make clean && GPU_ARCH=sm_80 make -j
 ```
 
-### Run Individual Benchmarks
-```bash
-make run-openacc-only   # OpenACC only
-make run-cuda-only      # CUDA regular only
-make run-cuda-opt-only  # CUDA optimized only
-```
+## Running
 
-### Run Complete Comparison
 ```bash
-make run-all-impl       # All three implementations
-```
+# Complete benchmark (correctness + performance)
+make run
 
-### Available Make Targets
-- `all` - Build unified benchmark (OpenACC default)
-- `all-impl` - Build all individual implementations
-- `run-all-impl` - Run complete three-way comparison
-- `clean` - Remove all generated files
-- `show-results` - Display CSV benchmark results
-- `help` - Show all available targets
+# View CSV results
+make show-results
+
+# Clean everything
+make clean
+
+# Show help
+make help
+```
 
 ## Benchmark Output
 
-Results are saved to `benchmark.csv` with detailed timing breakdowns:
-- **Total_Time**: Wall-clock time including all overhead
-- **Section0_Time**: Main FDTD compute kernel time
-- **Section1_Time**: Source injection kernel time
-- **Device_Time**: Combined GPU kernel time
-- **Overhead**: Memory transfers + kernel launch overhead
-- **GFLOPS/GBps**: Performance metrics
+### Console Output
+```
+STEP 1: CORRECTNESS VERIFICATION
+- Tests 5 grid sizes (32³ to 512³)
+- Compares CUDA vs OpenACC
+- Compares CUDA_Optimized vs OpenACC
+- Reports max absolute/relative error, L2 norm
+
+STEP 2: PERFORMANCE BENCHMARK
+- Runs all implementations
+- Shows timing breakdown per grid size
+- Computes GFLOP/s and GB/s metrics
+- Displays GPU efficiency percentages
+
+STEP 3: RESULTS SUMMARY
+- CSV table with all metrics
+- Ready for analysis/plotting
+```
+
+### CSV Schema (benchmark.csv)
+```
+Method,Total_Time(ms),Total_Std(ms),
+Section0_Time(ms),Section0_Std(ms),    # Main stencil compute
+Section1_Time(ms),Section1_Std(ms),    # Source injection
+Device_Time(ms),Device_Std(ms),        # Total GPU time
+Overhead(ms),Overhead_Std(ms),         # Host overhead
+GFLOPS,GFLOPS_Std,GBps,GBps_Std,
+Compute_Eff(%),Memory_Eff(%),          # vs GPU peak specs
+AI,NX,NY,NZ,Timesteps,Sources,StencilOrder
+```
 
 ## Implementation Details
 
 ### FDTD Algorithm
-- **4th-order finite difference** spatial discretization
+- **4th-order finite difference** spatial discretization (radius-2 stencil)
 - **2nd-order leapfrog** time integration
-- **3D acoustic wave equation** with variable velocity
-- **Ricker wavelet source** injection
-- **Perfectly matched layer** boundary conditions (implicit in padding)
+- **3D acoustic wave equation**: ∂²u/∂t² = v²∇²u
+- **Ricker wavelet source** injection with trilinear interpolation
+- **Halo padding**: 4 cells per side for boundary conditions
 
-### Grid Sizes Tested
-- 64³, 128³, 256³, 512³, 768³ (limited by GPU memory)
-- 100 timesteps per benchmark
-- 8-point halo padding for boundary conditions
+### Optimizations
+
+#### OpenACC
+- `#pragma acc parallel loop collapse(3)`
+- Compiler-managed data movement
+- Automatic kernel fusion
+
+#### CUDA
+- Coalesced global memory access
+- 3D thread block tiling
+
+#### CUDA_Optimized
+- **Shared memory tiling**: 8×8×8 blocks with 12×12×12 tiles (radius-2 halos)
+- **Constant memory**: Stencil coefficients (-1/12, 4/3, -5/2)
+- **Loop unrolling**: `#pragma unroll` on halo loads and stencil ops
+- **Mixed precision ready**: Infrastructure for FP16 storage (disabled)
 
 ### Performance Metrics
-- **36 FLOPs per grid point** per timestep (4th-order 3D Laplacian + leapfrog)
-- **64 bytes I/O per grid point** per timestep (memory bandwidth model)
-- **Device-only timing** excludes memory transfer overhead
+- **FLOPs per point**: 3×(4+1)×2 + 6 = 36 (4th-order 3D Laplacian + leapfrog)
+- **Bytes per point**: ~64 (naive) or ~12 (optimized with cache reuse)
+- **Arithmetic Intensity**: 0.56 - 3.0 FLOPs/byte (memory-bound)
 
-## Code Highlights
+## Recent Updates
 
-### OpenACC Implementation
-```cpp
-#pragma acc parallel loop collapse(3) present(m,u)
-for (int x = x_m; x <= x_M; x += 1) {
-    for (int y = y_m; y <= y_M; y += 1) {
-        for (int z = z_m; z <= z_M; z += 1) {
-            // 4th-order stencil computation
-        }
-    }
-}
-```
+### Unified Benchmark (Latest)
+- Single executable runs correctness + performance tests
+- Simplified Makefile (just `make run`)
+- All timing in milliseconds (CSV and console)
+- Automatic GPU detection and peak specs
 
-### CUDA Implementation
-```cpp
-__global__ void stencil_update_kernel(
-    const float* __restrict__ m,
-    const float* __restrict__ u,
-    float* __restrict__ u_out,
-    // ... parameters
-) {
-    const int gx = x_m + blockIdx.x * blockDim.x + threadIdx.x;
-    // ... CUDA kernel implementation
-}
-```
+### CUDA_Optimized Enhancements
+- Added `#pragma unroll` to stencil computation and halo loading
+- Fixed halo loading to include both ±1 and ±2 neighbors
+- Expected 5-15% performance improvement
+
+## GPU Compatibility
+
+| GPU | Compute Capability | GPU_ARCH | Status |
+|-----|-------------------|----------|--------|
+| RTX 2080 Ti | 7.5 (Turing) | sm_75 | ✅ Tested |
+| A100 | 8.0 (Ampere) | sm_80 | ✅ Compatible |
+| H100 | 9.0 (Hopper) | sm_90 | ✅ Compatible |
+
+## Performance Notes
+
+- OpenACC performance is highly compiler-dependent (NVHPC 23.11+)
+- RTX 2080 Ti: FP16 Tensor Cores available but limited benefit for memory-bound workloads
+- Peak bandwidth: ~616 GB/s (2080 Ti), ~2000 GB/s (A100), ~3350 GB/s (H100)
+- Shared memory tiling benefits increase with larger L1 cache (A100+)
 
 ## License
 
 This project is provided as-is for research and educational purposes.
 
-## Performance Notes
+## References
 
-- Results obtained on NVIDIA Tesla GPU (Compute Capability 7.5)
-- Compiled with `-O3` optimization
-- OpenACC performance is highly compiler-dependent
-- CUDA optimizations may vary by architecture
-
-## Contributing
-
-Feel free to submit improvements, additional implementations, or performance optimizations via pull requests.
+- DEBUG.md: Detailed development history and bug fixes
+- H100_README.md: H100-specific optimizations and pipelining

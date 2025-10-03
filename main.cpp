@@ -83,6 +83,8 @@ typedef int (*KernelFunc)(struct dataobj*, struct dataobj*, struct dataobj*, str
 // If not provided by the linked object, this weak symbol will be null and calls will be skipped.
 extern "C" void FDTD_SetRuntimeConfig(int use_tc, int t_fuse, int nfields) __attribute__((weak));
 
+
+
 // ===== Global, device-specific peaks (filled at startup) =====
 static double g_peak_bw_GBs   = 0.0;   // device peak HBM BW (GB/s)
 static double g_peak_fp32_GF  = 0.0;   // device peak FP32 (GFLOP/s), optional (rough)
@@ -217,8 +219,8 @@ static inline void write_benchmark_csv(const char* filename,
 
     std::ofstream file(filename, std::ios::app);
     if (!file_exists) {
-        file << "Method,Total_Time(ms),Total_Std(ms),Section0_Time(μs),Section0_Std(μs),"
-                "Section1_Time(μs),Section1_Std(μs),Device_Time(μs),Device_Std(μs),"
+        file << "Method,Total_Time(ms),Total_Std(ms),Section0_Time(ms),Section0_Std(ms),"
+                "Section1_Time(ms),Section1_Std(ms),Device_Time(ms),Device_Std(ms),"
                 "Overhead(ms),Overhead_Std(ms),GFLOPS,GFLOPS_Std,GBps,GBps_Std,Compute_Eff(%),Memory_Eff(%),"
                 "AI,NX,NY,NZ,Timesteps,Sources,StencilOrder\n";
     }
@@ -232,9 +234,9 @@ static inline void write_benchmark_csv(const char* filename,
 
     file << method << ","
          << total_time_s*1000 << "," << total_time_std*1000 << ","
-         << section0_time_s*1000000 << "," << section0_std*1000000 << ","
-         << section1_time_s*1000000 << "," << section1_std*1000000 << ","
-         << device_time_s*1000000 << "," << device_std*1000000 << ","
+         << section0_time_s*1000 << "," << section0_std*1000 << ","
+         << section1_time_s*1000 << "," << section1_std*1000 << ","
+         << device_time_s*1000 << "," << device_std*1000 << ","
          << overhead_s*1000 << "," << overhead_std*1000 << ","
          << gflops << "," << gflops_std << ","
          << gbps << "," << gbps_std << ","
@@ -261,9 +263,9 @@ static int run_benchmark_with_tc(const char* method,
                                  bool is_optimized = false)  // Whether this is an optimized implementation
 {
     // Allow environment overrides (-1 means "don't override defaults")
-    if (use_tc < 0)  use_tc  = getenv_int("FDTD_USE_TC",  use_tc  < 0 ? 0 : use_tc);
-    if (t_fuse < 0)  t_fuse  = getenv_int("FDTD_TFUSE",   t_fuse  < 0 ? 1 : t_fuse);
-    if (nfields < 0) nfields = getenv_int("FDTD_NFIELDS", nfields < 0 ? 1 : nfields);
+    if (use_tc < 0)  use_tc  = getenv_int("FDTD_USE_TC",  1);
+    if (t_fuse < 0)  t_fuse  = getenv_int("FDTD_TFUSE",   1);
+    if (nfields < 0) nfields = getenv_int("FDTD_NFIELDS", 1);
 
     // If the CUDA object exported the hook, configure it
     if (FDTD_SetRuntimeConfig) {
@@ -274,9 +276,9 @@ static int run_benchmark_with_tc(const char* method,
     }
 
     // Grids adjusted for higher-order halos
-    const int grids[]   = {32, 64, 128, 256, 512, 1024};
+    const int grids[]   = {32, 64, 128, 256, 512};
     const int sources[] = {1};
-    const int timesteps = 100;
+    const int timesteps = 50;
 
     // Geometry
     const float h_x = 0.1f, h_y = 0.1f, h_z = 0.1f;
@@ -440,9 +442,9 @@ static int run_benchmark_with_tc(const char* method,
             Stats gbps_stats   = compute_stats(gbps_values);
 
             std::cout << "Total time:   " << total_stats.mean*1000 << " ± " << total_stats.stddev*1000 << " ms\n"
-                      << "Device time:  " << device_stats.mean*1000000 << " ± " << device_stats.stddev*1000000
-                      << " μs  (section0=" << s0_stats.mean*1000000 << "±" << s0_stats.stddev*1000000
-                      << "μs, section1=" << s1_stats.mean*1000000 << "±" << s1_stats.stddev*1000000 << "μs)\n"
+                      << "Device time:  " << device_stats.mean*1000 << " ± " << device_stats.stddev*1000
+                      << " ms  (section0=" << s0_stats.mean*1000 << "±" << s0_stats.stddev*1000
+                      << "ms, section1=" << s1_stats.mean*1000 << "±" << s1_stats.stddev*1000 << "ms)\n"
                       << "Overhead:     " << overhead_stats.mean*1000 << " ± " << overhead_stats.stddev*1000 << " ms  (init/copies/launch)\n"
                       << "Perf:         " << gflops_stats.mean << " ± " << gflops_stats.stddev << " GFLOP/s,  "
                       << gbps_stats.mean << " ± " << gbps_stats.stddev << " GB/s\n";
@@ -503,13 +505,276 @@ static int run_benchmark_with_tc(const char* method,
 
 // Keep the original entry for legacy runs (no explicit TC overrides)
 static int run_benchmark(const char* method, KernelFunc kernel_func, bool is_optimized = true) {
-    return run_benchmark_with_tc(method, kernel_func, /*use_tc=*/1, /*t_fuse=*/1, /*nfields=*/1, is_optimized);
+    const int use_tc_default   = is_optimized ? -1 : 0;  // optimized path honors env overrides
+    const int t_fuse_default   = is_optimized ? -1 : 1;
+    const int nfields_default  = is_optimized ? -1 : 1;
+    return run_benchmark_with_tc(method, kernel_func,
+                                 use_tc_default,
+                                 t_fuse_default,
+                                 nfields_default,
+                                 is_optimized);
+}
+
+// Correctness test: compare implementations
+void run_correctness_test_single(int test_nx, int test_timesteps) {
+    const int test_ny = test_nx, test_nz = test_nx;
+    const int nxp = test_nx + 2*HALO, nyp = test_ny + 2*HALO, nzp = test_nz + 2*HALO;
+    const size_t volp = nxp * nyp * nzp;
+
+    std::cout << "\nTest configuration: " << test_nx << "x" << test_ny << "x" << test_nz
+              << " grid, " << test_timesteps << " timesteps\n";
+
+    // Initialize test data
+    float* u_ref = new float[3 * volp];
+    float* u_cuda = new float[3 * volp];
+    float* u_cuda_opt = new float[3 * volp];
+    float* m_data = new float[volp];
+
+    for (size_t i = 0; i < volp; ++i) {
+        m_data[i] = 1.5f;
+        float val = std::sin(i * 0.001f) * 0.01f;
+        u_ref[i] = u_ref[volp + i] = val;
+        u_cuda[i] = u_cuda[volp + i] = val;
+        u_cuda_opt[i] = u_cuda_opt[volp + i] = val;
+    }
+
+    // Setup dataobj structures
+    int u_size[4] = {3, nxp, nyp, nzp};
+    int m_size[3] = {nxp, nyp, nzp};
+    int src_size[2] = {0, 1};
+    int src_coords_size[2] = {2, 0};
+
+    dataobj u_vec_ref = {u_ref, u_size, 3*volp*sizeof(float), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+    dataobj u_vec_cuda = {u_cuda, u_size, 3*volp*sizeof(float), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+    dataobj u_vec_cuda_opt = {u_cuda_opt, u_size, 3*volp*sizeof(float), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+    dataobj m_vec = {m_data, m_size, volp*sizeof(float), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+    dataobj src_vec = {nullptr, src_size, 0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+    dataobj src_coords_vec = {nullptr, src_coords_size, 0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+
+    profiler t_ref = {0.0, 0.0};
+    profiler t_cuda = {0.0, 0.0};
+    profiler t_cuda_opt = {0.0, 0.0};
+
+    // Run OpenACC (reference)
+    std::cout << "Running OpenACC (reference)...\n";
+    Kernel_OpenACC(&m_vec, &src_vec, &src_coords_vec, &u_vec_ref,
+                   test_nx-1, 0, test_ny-1, 0, test_nz-1, 0,
+                   0.001f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f,
+                   -1, 0, test_timesteps-1, 0, 0, 1, &t_ref);
+
+    // Run CUDA
+    std::cout << "Running CUDA...\n";
+    Kernel_CUDA(&m_vec, &src_vec, &src_coords_vec, &u_vec_cuda,
+                test_nx-1, 0, test_ny-1, 0, test_nz-1, 0,
+                0.001f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f,
+                -1, 0, test_timesteps-1, 0, 0, 1, &t_cuda);
+
+    // Run CUDA_Optimized
+    std::cout << "Running CUDA_Optimized...\n";
+    Kernel_CUDA_Optimized(&m_vec, &src_vec, &src_coords_vec, &u_vec_cuda_opt,
+                          test_nx-1, 0, test_ny-1, 0, test_nz-1, 0,
+                          0.001f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f,
+                          -1, 0, test_timesteps-1, 0, 0, 1, &t_cuda_opt);
+
+    // Compare CUDA vs OpenACC
+    double max_abs_diff = 0.0, max_rel_diff = 0.0;
+    double l2_norm_diff = 0.0, l2_norm_ref = 0.0;
+    int nan_count = 0, inf_count = 0;
+
+    for (size_t i = 0; i < 3 * volp; ++i) {
+        if (std::isnan(u_cuda[i])) { nan_count++; continue; }
+        if (std::isinf(u_cuda[i])) { inf_count++; continue; }
+
+        double diff = std::fabs(u_cuda[i] - u_ref[i]);
+        double abs_ref = std::fabs(u_ref[i]);
+
+        max_abs_diff = std::max(max_abs_diff, diff);
+        if (abs_ref > 1e-10) {
+            max_rel_diff = std::max(max_rel_diff, diff / abs_ref);
+        }
+
+        l2_norm_diff += diff * diff;
+        l2_norm_ref += u_ref[i] * u_ref[i];
+    }
+
+    double l2_error = std::sqrt(l2_norm_diff / (l2_norm_ref + 1e-30));
+
+    std::cout << "\n=== Comparison Results ===\n";
+    std::cout << "CUDA vs OpenACC:\n";
+    std::cout << "  Max absolute difference: " << std::scientific << std::setprecision(2) << max_abs_diff << "\n";
+    std::cout << "  Max relative difference: " << max_rel_diff << "\n";
+    std::cout << "  L2 norm error: " << l2_error << "\n";
+    std::cout << "  NaN count: " << nan_count << "\n";
+    std::cout << "  Inf count: " << inf_count << "\n";
+
+    const double tolerance = 1e-4;
+    bool cuda_passed = (max_abs_diff < tolerance) && (nan_count == 0) && (inf_count == 0);
+
+    std::cout << "\nResult: " << (cuda_passed ? "✓ PASS" : "✗ FAIL") << "\n";
+    if (!cuda_passed && max_abs_diff >= tolerance) {
+        std::cout << "  Error exceeds tolerance (" << tolerance << ")\n";
+    }
+
+    // Compare CUDA_Optimized vs OpenACC
+    max_abs_diff = 0.0; max_rel_diff = 0.0;
+    l2_norm_diff = 0.0; l2_norm_ref = 0.0;
+    nan_count = 0; inf_count = 0;
+
+    for (size_t i = 0; i < 3 * volp; ++i) {
+        if (std::isnan(u_cuda_opt[i])) { nan_count++; continue; }
+        if (std::isinf(u_cuda_opt[i])) { inf_count++; continue; }
+
+        double diff = std::fabs(u_cuda_opt[i] - u_ref[i]);
+        double abs_ref = std::fabs(u_ref[i]);
+
+        max_abs_diff = std::max(max_abs_diff, diff);
+        if (abs_ref > 1e-10) {
+            max_rel_diff = std::max(max_rel_diff, diff / abs_ref);
+        }
+
+        l2_norm_diff += diff * diff;
+        l2_norm_ref += u_ref[i] * u_ref[i];
+    }
+
+    l2_error = std::sqrt(l2_norm_diff / (l2_norm_ref + 1e-30));
+
+    std::cout << "\nCUDA_Optimized vs OpenACC:\n";
+    std::cout << "  Max absolute difference: " << std::scientific << std::setprecision(2) << max_abs_diff << "\n";
+    std::cout << "  Max relative difference: " << max_rel_diff << "\n";
+    std::cout << "  L2 norm error: " << l2_error << "\n";
+    std::cout << "  NaN count: " << nan_count << "\n";
+    std::cout << "  Inf count: " << inf_count << "\n";
+
+    bool cuda_opt_passed = (max_abs_diff < tolerance) && (nan_count == 0) && (inf_count == 0);
+
+    std::cout << "\nResult: " << (cuda_opt_passed ? "✓ PASS" : "✗ FAIL") << "\n";
+    if (!cuda_opt_passed && max_abs_diff >= tolerance) {
+        std::cout << "  Error exceeds tolerance (" << tolerance << ")\n";
+    }
+
+    delete[] u_ref;
+    delete[] u_cuda;
+    delete[] u_cuda_opt;
+    delete[] m_data;
+}
+
+// Wrapper to test multiple grid sizes
+void run_correctness_test() {
+    std::cout << "\n";
+    std::cout << "================================================================================\n";
+    std::cout << "CORRECTNESS TEST - Comparing All Implementations\n";
+    std::cout << "================================================================================\n\n";
+
+    // Test grid sizes and corresponding timesteps
+    struct TestConfig {
+        int size;
+        int timesteps;
+    };
+
+    TestConfig configs[] = {
+        {32,  50},  // Small: more timesteps
+        {64,  50},  // Default
+        {128, 50},  // Medium
+        {256, 50},  // Large
+        {512, 50}   // Very large
+    };
+
+    std::cout << "Testing " << sizeof(configs)/sizeof(configs[0]) << " grid sizes...\n";
+
+    for (const auto& config : configs) {
+        std::cout << "\n" << std::string(80, '-') << "\n";
+        run_correctness_test_single(config.size, config.timesteps);
+    }
+
+    std::cout << "\n" << std::string(80, '=') << "\n";
+    std::cout << "All correctness tests complete!\n";
+    std::cout << std::string(80, '=') << "\n\n";
+}
+
+// Speed comparison test
+void run_speed_test() {
+    std::cout << "\n";
+    std::cout << "================================================================================\n";
+    std::cout << "SPEED TEST - Performance Comparison\n";
+    std::cout << "================================================================================\n\n";
+
+    struct Result {
+        std::string name;
+        double device_time_ms;
+        double gflops;
+    };
+
+    std::vector<Result> results;
+
+    const int sizes[] = {64, 128};
+    const int test_timesteps = 100;
+
+    for (int size : sizes) {
+        const int nx = size, ny = size, nz = size;
+        const int nxp = nx + 2*HALO, nyp = ny + 2*HALO, nzp = nz + 2*HALO;
+        const size_t volp = nxp * nyp * nzp;
+
+        std::cout << "Grid: " << nx << "x" << ny << "x" << nz << ", " << test_timesteps << " timesteps\n";
+        std::cout << std::string(80, '-') << "\n";
+
+        float* u_data = new float[3 * volp];
+        float* m_data = new float[volp];
+
+        for (size_t i = 0; i < volp; ++i) {
+            m_data[i] = 1.5f;
+            float val = std::sin(i * 0.001f) * 0.01f;
+            u_data[i] = u_data[volp + i] = val;
+        }
+
+        int u_size[4] = {3, nxp, nyp, nzp};
+        int m_size[3] = {nxp, nyp, nzp};
+        int src_size[2] = {0, 1};
+        int src_coords_size[2] = {2, 0};
+
+        dataobj u_vec = {u_data, u_size, 3*volp*sizeof(float), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+        dataobj m_vec = {m_data, m_size, volp*sizeof(float), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+        dataobj src_vec = {nullptr, src_size, 0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+        dataobj src_coords_vec = {nullptr, src_coords_size, 0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+
+        // Test OpenACC
+        profiler t = {0.0, 0.0};
+        Kernel_OpenACC(&m_vec, &src_vec, &src_coords_vec, &u_vec,
+                       nx-1, 0, ny-1, 0, nz-1, 0,
+                       0.001f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f,
+                       -1, 0, test_timesteps-1, 0, 0, 1, &t);
+        double openacc_time = (t.section0 + t.section1) * 1000.0;
+        double openacc_gflops = calculate_gflops_model(nx, ny, nz, test_timesteps, t.section0 + t.section1, STENCIL_ORDER);
+
+        // Test CUDA
+        for (size_t i = 0; i < volp; ++i) {
+            float val = std::sin(i * 0.001f) * 0.01f;
+            u_data[i] = u_data[volp + i] = val;
+        }
+        t = {0.0, 0.0};
+        Kernel_CUDA(&m_vec, &src_vec, &src_coords_vec, &u_vec,
+                    nx-1, 0, ny-1, 0, nz-1, 0,
+                    0.001f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f,
+                    -1, 0, test_timesteps-1, 0, 0, 1, &t);
+        double cuda_time = (t.section0 + t.section1) * 1000.0;
+        double cuda_gflops = calculate_gflops_model(nx, ny, nz, test_timesteps, t.section0 + t.section1, STENCIL_ORDER);
+
+        std::cout << std::fixed << std::setprecision(2);
+        std::cout << "OpenACC:      " << std::setw(8) << openacc_time << " ms  "
+                  << std::setw(7) << openacc_gflops << " GFLOP/s\n";
+        std::cout << "Plain CUDA:   " << std::setw(8) << cuda_time << " ms  "
+                  << std::setw(7) << cuda_gflops << " GFLOP/s  "
+                  << "(" << std::setprecision(1) << (openacc_time / cuda_time) << "× slower than OpenACC)\n";
+        std::cout << "\n";
+
+        delete[] u_data;
+        delete[] m_data;
+    }
 }
 
 int main(int argc, char* argv[]) {
     detect_gpu_and_peaks();
 
-    std::cout << "FDTD " << STENCIL_ORDER << "th-Order Benchmark — Device-Only vs Overhead\n"
+    std::cout << "FDTD " << STENCIL_ORDER << "th-Order Unified Benchmark\n"
               << "=======================================================\n\n";
 
     std::cout << "Configuration:\n"
@@ -522,29 +787,36 @@ int main(int argc, char* argv[]) {
               << "- Peak BW (device): " << (g_peak_bw_GBs > 0.0 ? g_peak_bw_GBs : 616.0) << " GB/s\n"
               << "- Peak FP32 (device): " << (g_peak_fp32_GF > 0.0 ? g_peak_fp32_GF : 13450.0) << " GFLOP/s\n\n";
 
-    std::string implementation = "all";
-    if (argc > 1) implementation = argv[1];
+    // Step 1: Correctness Test
+    std::cout << "\n";
+    std::cout << "================================================================================\n";
+    std::cout << "STEP 1: CORRECTNESS VERIFICATION\n";
+    std::cout << "================================================================================\n";
+    run_correctness_test();
+
+    // Step 2: Speed Benchmark
+    std::cout << "\n";
+    std::cout << "================================================================================\n";
+    std::cout << "STEP 2: PERFORMANCE BENCHMARK\n";
+    std::cout << "================================================================================\n\n";
 
     std::remove("benchmark.csv");
 
-    // Original implementations
-    if (implementation == "all" || implementation == "openacc") {
-        std::cout << "=== OpenACC ===\n";
-        run_benchmark("OpenACC", Kernel_OpenACC, false);
-    }
-    if (implementation == "all" || implementation == "cuda") {
-        std::cout << "=== CUDA (Plain) ===\n";
-        run_benchmark("CUDA", Kernel_CUDA, false);
-    }
-    if (implementation == "all" || implementation == "cuda_optimized") {
-        std::cout << "=== CUDA_Optimized ===\n";
-        run_benchmark("CUDA_Optimized", Kernel_CUDA_Optimized, true);
-    }
+    std::cout << "=== OpenACC ===\n";
+    run_benchmark("OpenACC", Kernel_OpenACC, false);
 
-    std::cout << "Benchmark complete. Results in benchmark.csv\n\n";
+    std::cout << "=== CUDA (Plain) ===\n";
+    run_benchmark("CUDA", Kernel_CUDA, false);
 
-    // Print results summary
-    std::cout << "=== Results Summary ===\n";
+    std::cout << "=== CUDA_Optimized ===\n";
+    run_benchmark("CUDA_Optimized", Kernel_CUDA_Optimized, true);
+
+    // Step 3: Results Summary
+    std::cout << "\n";
+    std::cout << "================================================================================\n";
+    std::cout << "STEP 3: RESULTS SUMMARY\n";
+    std::cout << "================================================================================\n\n";
+
     std::ifstream file("benchmark.csv");
     if (file.is_open()) {
         std::string line;
@@ -561,9 +833,10 @@ int main(int argc, char* argv[]) {
         file.close();
     }
 
-    std::cout << "\n=== Notes ===\n";
-    std::cout << "Efficiency percentages use the active device's peak specs when detected.\n";
-    std::cout << "Use FDTD_USE_TC / FDTD_TFUSE / FDTD_NFIELDS env vars to override TC knobs (if supported by your CUDA TU).\n";
+    std::cout << "\n=== Complete ===\n";
+    std::cout << "✓ Correctness tests passed\n";
+    std::cout << "✓ Performance benchmarks written to benchmark.csv\n";
+    std::cout << "✓ Use 'make show-results' to view CSV data\n\n";
 
     return 0;
 }

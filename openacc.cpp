@@ -126,6 +126,7 @@ int Kernel_OpenACC(struct dataobj *__restrict m_vec, struct dataobj *__restrict 
              int posx = static_cast<int>(std::floor((-o_x + src_coords[p_src][0])/h_x));
              int posy = static_cast<int>(std::floor((-o_y + src_coords[p_src][1])/h_y));
              int posz = static_cast<int>(std::floor((-o_z + src_coords[p_src][2])/h_z));
+             //
              float px = -std::floor((-o_x + src_coords[p_src][0])/h_x) + (-o_x + src_coords[p_src][0])/h_x;
              float py = -std::floor((-o_y + src_coords[p_src][1])/h_y) + (-o_y + src_coords[p_src][1])/h_y;
              float pz = -std::floor((-o_z + src_coords[p_src][2])/h_z) + (-o_z + src_coords[p_src][2])/h_z;
