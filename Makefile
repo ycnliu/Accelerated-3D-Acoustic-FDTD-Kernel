@@ -9,7 +9,7 @@ NVCC = $(NVHPC_PATH)/nvcc
 # H100 = Hopper (sm_90 / cc90) - default for ConvStencil optimization
 # RTX 2080 Ti = Turing (sm_75 / cc75)
 # Set GPU_ARCH=sm_75 for 2080 Ti, GPU_ARCH=sm_90 for H100
-GPU_ARCH      ?= sm_75
+GPU_ARCH      ?= sm_90
 CUDA_ARCH_SM   = $(GPU_ARCH)
 NVHPC_CC       = $(subst sm_,cc,$(GPU_ARCH))
 
@@ -21,7 +21,7 @@ NVHPC_LINK_FLAGS = -cuda -cudalib=cublas,curand
 
 # NVCC compile flags for .cu -> .o
 CUDA_FLAGS  = -O3 --std=c++17 -arch=$(CUDA_ARCH_SM) -lineinfo \
-              -Xptxas=-O3,-dlcm=ca -use_fast_math
+              -Xptxas=-O3,-dlcm=ca -use_fast_math --extended-lambda
 
 # ---------------- Files ----------------
 TARGET        = fdtd_benchmark
