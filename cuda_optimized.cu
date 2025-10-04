@@ -46,7 +46,7 @@ __constant__ float c_weights[STENCIL_ORDER + 1] = {-1.0f/12.0f, 4.0f/3.0f, -2.5f
 // ---------------- Section 0: Final Pipelined Scalar Kernel ----------------
 // Compile-time switch: set to 1 for FP32-only (correctness test), 0 for FP16 storage
 #ifndef USE_FP32_ONLY
-#define USE_FP32_ONLY 0
+#define USE_FP32_ONLY 1
 #endif
 
 __global__ void stencil_update_h100_scalar_pipelined_kernel(
@@ -102,7 +102,7 @@ __global__ void stencil_update_h100_scalar_pipelined_kernel(
       // left halo columns are [0 .. R-1]
       P[sy * pitchZ + xh] = __ldg(u_t0_f32 + (c - (R - xh)));
       // right halo columns are [R + TZ .. R + TZ + R - 1]
-      P[sy * pitchZ + (R + TZ + xh)] = __ldg(u_t0_f32 + (c + TZ + xh));
+      P[sy * pitchZ + (R + TZ + xh)] = __ldg(u_t0_f32 + (c + (xh + 1)));
     }
 
     // 3) Y halos: let the first R threads load both bottom and top edges
@@ -111,7 +111,7 @@ __global__ void stencil_update_h100_scalar_pipelined_kernel(
       // bottom halo rows are [0 .. R-1]
       P[yh * pitchZ + sz] = __ldg(u_t0_f32 + (c - (R - yh) * nzp));
       // top halo rows are [R + TY .. R + TY + R - 1]
-      P[(R + TY + yh) * pitchZ + sz] = __ldg(u_t0_f32 + (c + (TY + yh) * nzp));
+      P[(R + TY + yh) * pitchZ + sz] = __ldg(u_t0_f32 + (c + (yh + 1) * nzp));
     }
   };
 
