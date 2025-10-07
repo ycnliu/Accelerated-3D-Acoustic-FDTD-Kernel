@@ -42,7 +42,11 @@ __constant__ float c_weights[STENCIL_ORDER + 1] = {-1.0f/12.0f, 4.0f/3.0f, -2.5f
 #ifndef XCHUNK
 #define XCHUNK 64
 #endif
-#define UNROLL_FACTOR 4
+
+// Temporal blocking depth - higher values amortize sync overhead but use more shared memory
+#ifndef UNROLL_FACTOR
+#define UNROLL_FACTOR 8  // Increased from 4 to 8 for better temporal reuse
+#endif
 
 // ---------------- Section 0: Final Pipelined Scalar Kernel ----------------
 // Compile-time switch: set to 1 for FP32-only (correctness test), 0 for FP16 storage
@@ -107,13 +111,40 @@ void stencil_update_h100_scalar_pipelined_kernel(
     // 1) Center load (every thread loads its own cell)
     P[sy * pitchZ + sz] = __ldg(u_t0_f32 + row_base_center + (size_t)Zpad);
 
-    // 2) Z halos: use block Z base (not per-thread gz)
+    // 2) Z halos: vectorized loads with float4 for 4× memory transaction reduction
     // First R threads load left and right halo columns for the entire block
     if (threadIdx.x < R) {
       const int zL = Zbase + threadIdx.x;           // left halo: Zbase + [0..R-1]
       const int zR = Zbase + TZ + R + threadIdx.x;  // right halo: Zbase + TZ + R + [0..R-1]
-      P[sy * pitchZ + threadIdx.x]              = __ldg(u_t0_f32 + row_base_center + (size_t)zL);
-      P[sy * pitchZ + (R + TZ + threadIdx.x)]   = __ldg(u_t0_f32 + row_base_center + (size_t)zR);
+
+      // Check alignment for vectorized loads (requires 16-byte alignment for float4)
+      const size_t addr_L = row_base_center + (size_t)zL;
+      const size_t addr_R = row_base_center + (size_t)zR;
+
+      // Use vectorized loads if possible (Z-dimension is contiguous and aligned)
+      if (threadIdx.x == 0 && R >= 4 && (addr_L % 4 == 0)) {
+        // Load 4 floats at once for left halo
+        const float4* u_vec = reinterpret_cast<const float4*>(u_t0_f32 + addr_L);
+        float4 data_L = __ldg(u_vec);
+        P[sy * pitchZ + 0] = data_L.x;
+        P[sy * pitchZ + 1] = data_L.y;
+        P[sy * pitchZ + 2] = data_L.z;
+        P[sy * pitchZ + 3] = data_L.w;
+      } else {
+        P[sy * pitchZ + threadIdx.x] = __ldg(u_t0_f32 + addr_L);
+      }
+
+      if (threadIdx.x == 0 && R >= 4 && (addr_R % 4 == 0)) {
+        // Load 4 floats at once for right halo
+        const float4* u_vec = reinterpret_cast<const float4*>(u_t0_f32 + addr_R);
+        float4 data_R = __ldg(u_vec);
+        P[sy * pitchZ + (R + TZ + 0)] = data_R.x;
+        P[sy * pitchZ + (R + TZ + 1)] = data_R.y;
+        P[sy * pitchZ + (R + TZ + 2)] = data_R.z;
+        P[sy * pitchZ + (R + TZ + 3)] = data_R.w;
+      } else {
+        P[sy * pitchZ + (R + TZ + threadIdx.x)] = __ldg(u_t0_f32 + addr_R);
+      }
     }
 
     // 3) Y halos: use block Y base (not per-thread gy)
@@ -327,6 +358,23 @@ extern "C" int Kernel_CUDA_Optimized(
   const float r2 = 1.0f/(h_x*h_x), r3 = 1.0f/(h_y*h_y), r4 = 1.0f/(h_z*h_z);
   const int ext_x=(x_M-x_m+1), ext_y=(y_M-y_m+1), ext_z=(z_M-z_m+1);
   if (ext_x <= 0 || ext_y <= 0 || ext_z <= 0) return cudaErrorInvalidValue;
+
+  // Set L2 cache persistence for shadow buffers (H100 has 50MB L2)
+  size_t l2_cache_size = 0;
+  cudaDeviceGetAttribute((int*)&l2_cache_size, cudaDevAttrL2CacheSize, deviceid >= 0 ? deviceid : 0);
+  if (l2_cache_size > 0) {
+    size_t persist_size = min(l2_cache_size, (size_t)(40 * 1024 * 1024));  // Use up to 40MB
+    cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, persist_size);
+
+    // Set persistence window for shadow buffers
+    cudaStreamAttrValue stream_attr = {};
+    stream_attr.accessPolicyWindow.base_ptr = d_shadow[0];
+    stream_attr.accessPolicyWindow.num_bytes = 3 * nPerLevel * sizeof(float);
+    stream_attr.accessPolicyWindow.hitRatio = 1.0f;  // Maximum persistence
+    stream_attr.accessPolicyWindow.hitProp = cudaAccessPropertyPersisting;
+    stream_attr.accessPolicyWindow.missProp = cudaAccessPropertyStreaming;
+    cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &stream_attr);
+  }
 
   dim3 block(TZ,TY,1);
   dim3 grid(divUp(ext_z,TZ), divUp(ext_y,TY), divUp(ext_x,XCHUNK));
