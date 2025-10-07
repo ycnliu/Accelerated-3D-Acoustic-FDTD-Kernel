@@ -20,8 +20,6 @@ __device__ __forceinline__ size_t idx_u_txyz(int t,int X,int Y,int Z,int nxp,int
   return ((size_t)t*nxp*nyp*nzp)+((size_t)X*nyp*nzp)+((size_t)Y*nzp)+(size_t)Z;}
 __device__ __forceinline__ size_t idx_m_xyz(int X,int Y,int Z,int nyp,int nzp){
   return ((size_t)X*nyp*nzp)+((size_t)Y*nzp)+(size_t)Z;}
-__device__ __forceinline__ int clampi(int v, int lo, int hi){
-  return max(lo, min(v, hi));}
 static inline int divUp(int a,int b){return (a+b-1)/b;}
 
 #define START(S) struct timeval start_ ## S , end_ ## S ; gettimeofday(&start_ ## S , nullptr);
@@ -104,42 +102,64 @@ void stencil_update_h100_scalar_pipelined_kernel(
     return (size_t)Xpad * nyp * nzp + (size_t)Ypad * nzp + (size_t)Zpad;
   };
 
-  auto load_plane = [&] __device__ (int buf, int Xpad_in){
-    // Clamp X coordinate to avoid OOB reads - always load SOMETHING
-    const int Xpad = clampi(Xpad_in, 0, nxp-1);
+  auto load_plane = [&] __device__ (int buf, int Xpad){
+    if (Xpad < 0 || Xpad >= nxp) return;
 
     float* P = PP(buf);
     const int sy = threadIdx.y + R;
     const int sz = threadIdx.x + R;
 
-    // Clamp Y/Z for this thread to valid range
-    const int Yc = clampi(Ypad, 0, nyp-1);
-    const int Zc = clampi(Zpad, 0, nzp-1);
-
-    // Row base for this X-plane and Y-row
-    const size_t row_base_center = ((size_t)Xpad * nyp + (size_t)Yc) * nzp;
+    // Row base for this X-plane and Y-row (computed per thread)
+    const size_t row_base_center = ((size_t)Xpad * nyp + (size_t)Ypad) * nzp;
 
     // 1) Center load (every thread loads its own cell)
-    P[sy * pitchZ + sz] = __ldg(u_t0_f32 + row_base_center + (size_t)Zc);
+    P[sy * pitchZ + sz] = __ldg(u_t0_f32 + row_base_center + (size_t)Zpad);
 
-    // 2) Z halos: load left and right halo columns with clamping
+    // 2) Z halos: vectorized loads with float4 for 4× memory transaction reduction
     // First R threads load left and right halo columns for the entire block
     if (threadIdx.x < R) {
-      const int zL = clampi(Zbase + threadIdx.x,            0, nzp-1);
-      const int zR = clampi(Zbase + TZ + R + threadIdx.x,   0, nzp-1);
-      P[sy * pitchZ + threadIdx.x]              = __ldg(u_t0_f32 + row_base_center + (size_t)zL);
-      P[sy * pitchZ + (R + TZ + threadIdx.x)]   = __ldg(u_t0_f32 + row_base_center + (size_t)zR);
+      const int zL = Zbase + threadIdx.x;           // left halo: Zbase + [0..R-1]
+      const int zR = Zbase + TZ + R + threadIdx.x;  // right halo: Zbase + TZ + R + [0..R-1]
+
+      // Check alignment for vectorized loads (requires 16-byte alignment for float4)
+      const size_t addr_L = row_base_center + (size_t)zL;
+      const size_t addr_R = row_base_center + (size_t)zR;
+
+      // Use vectorized loads if possible (Z-dimension is contiguous and aligned)
+      if (threadIdx.x == 0 && R >= 4 && (addr_L % 4 == 0)) {
+        // Load 4 floats at once for left halo
+        const float4* u_vec = reinterpret_cast<const float4*>(u_t0_f32 + addr_L);
+        float4 data_L = __ldg(u_vec);
+        P[sy * pitchZ + 0] = data_L.x;
+        P[sy * pitchZ + 1] = data_L.y;
+        P[sy * pitchZ + 2] = data_L.z;
+        P[sy * pitchZ + 3] = data_L.w;
+      } else {
+        P[sy * pitchZ + threadIdx.x] = __ldg(u_t0_f32 + addr_L);
+      }
+
+      if (threadIdx.x == 0 && R >= 4 && (addr_R % 4 == 0)) {
+        // Load 4 floats at once for right halo
+        const float4* u_vec = reinterpret_cast<const float4*>(u_t0_f32 + addr_R);
+        float4 data_R = __ldg(u_vec);
+        P[sy * pitchZ + (R + TZ + 0)] = data_R.x;
+        P[sy * pitchZ + (R + TZ + 1)] = data_R.y;
+        P[sy * pitchZ + (R + TZ + 2)] = data_R.z;
+        P[sy * pitchZ + (R + TZ + 3)] = data_R.w;
+      } else {
+        P[sy * pitchZ + (R + TZ + threadIdx.x)] = __ldg(u_t0_f32 + addr_R);
+      }
     }
 
-    // 3) Y halos: load bottom and top halo rows with clamping
+    // 3) Y halos: use block Y base (not per-thread gy)
     // First R threads load bottom and top halo rows for the entire block
     if (threadIdx.y < R) {
-      const int yB = clampi(Ybase + threadIdx.y,          0, nyp-1);
-      const int yT = clampi(Ybase + TY + R + threadIdx.y, 0, nyp-1);
+      const int yB = Ybase + threadIdx.y;           // bottom halo: Ybase + [0..R-1]
+      const int yT = Ybase + TY + R + threadIdx.y;  // top halo: Ybase + TY + R + [0..R-1]
       const size_t row_base_bot = ((size_t)Xpad * nyp + (size_t)yB) * nzp;
       const size_t row_base_top = ((size_t)Xpad * nyp + (size_t)yT) * nzp;
-      P[threadIdx.y * pitchZ + sz]              = __ldg(u_t0_f32 + row_base_bot + (size_t)Zc);
-      P[(R + TY + threadIdx.y) * pitchZ + sz]   = __ldg(u_t0_f32 + row_base_top + (size_t)Zc);
+      P[threadIdx.y * pitchZ + sz]              = __ldg(u_t0_f32 + row_base_bot + (size_t)Zpad);
+      P[(R + TY + threadIdx.y) * pitchZ + sz]   = __ldg(u_t0_f32 + row_base_top + (size_t)Zpad);
     }
   };
 
@@ -155,6 +175,12 @@ void stencil_update_h100_scalar_pipelined_kernel(
 
   int x = x0;
 
+  // Software pipelining: Prefetch first plane for iteration 0
+  int next_load_x = x + UNROLL_FACTOR;
+  if (next_load_x <= x1) {
+    load_plane((cur + UNROLL_FACTOR) % ring_size, (next_load_x + R) + HALO);
+  }
+
   for (; x <= x1 - (UNROLL_FACTOR-1); x += UNROLL_FACTOR){
 
     #pragma unroll
@@ -166,71 +192,77 @@ void stencil_update_h100_scalar_pipelined_kernel(
       float* Pp1 = PP((cur + 3) % ring_size);
       float* Pp2 = PP((cur + 4) % ring_size);
 
-      // Compute current iteration - guard global reads with active check
+      // Start async load of next plane BEFORE compute (software pipelining)
+      const int prefetch_x = current_x + R + UNROLL_FACTOR;
+      bool do_prefetch = (prefetch_x + HALO < nxp);
+
+      __syncthreads();  // Ensure previous iteration complete
+
+      // Compute current iteration
+      const float uc  = Pc[sy*pitchZ + sz];
+      // Read um1 from FP32 shadow to avoid FP16 quantization feedback
+      const float um1 = __ldg(u_t1_f32 + gIndex(current_x + HALO));
+
+      // FMA-optimized Laplacian (better performance, symmetric weight reuse)
+      float d2dx2 = fmaf(c_weights[0], Pm2[sy*pitchZ+sz] + Pp2[sy*pitchZ+sz],
+                    fmaf(c_weights[1], Pm1[sy*pitchZ+sz] + Pp1[sy*pitchZ+sz],
+                         c_weights[2]*uc));
+      float d2dy2 = fmaf(c_weights[0], Pc[(sy-2)*pitchZ+sz] + Pc[(sy+2)*pitchZ+sz],
+                    fmaf(c_weights[1], Pc[(sy-1)*pitchZ+sz] + Pc[(sy+1)*pitchZ+sz],
+                         c_weights[2]*uc));
+      float d2dz2 = fmaf(c_weights[0], Pc[sy*pitchZ+sz-2] + Pc[sy*pitchZ+sz+2],
+                    fmaf(c_weights[1], Pc[sy*pitchZ+sz-1] + Pc[sy*pitchZ+sz+1],
+                         c_weights[2]*uc));
+
+      const float lap   = r2*d2dx2 + r3*d2dy2 + r4*d2dz2;
+      const float mval  = __ldg(m + idx_m_xyz(current_x + HALO, Ypad, Zpad, nyp, nzp));
+      const float unew  = 2.0f * uc - um1 + (dt*dt) * lap / mval;
+
+      // Only write output if this thread is in active domain
       if (active) {
-        const float uc  = Pc[sy*pitchZ + sz];
-        // Read um1 from FP32 shadow to avoid FP16 quantization feedback
-        const size_t g_idx = gIndex(current_x + HALO);
-        const float um1 = __ldg(u_t1_f32 + g_idx);
-
-        // FMA-optimized Laplacian (better performance, symmetric weight reuse)
-        float d2dx2 = fmaf(c_weights[0], Pm2[sy*pitchZ+sz] + Pp2[sy*pitchZ+sz],
-                      fmaf(c_weights[1], Pm1[sy*pitchZ+sz] + Pp1[sy*pitchZ+sz],
-                           c_weights[2]*uc));
-        float d2dy2 = fmaf(c_weights[0], Pc[(sy-2)*pitchZ+sz] + Pc[(sy+2)*pitchZ+sz],
-                      fmaf(c_weights[1], Pc[(sy-1)*pitchZ+sz] + Pc[(sy+1)*pitchZ+sz],
-                           c_weights[2]*uc));
-        float d2dz2 = fmaf(c_weights[0], Pc[sy*pitchZ+sz-2] + Pc[sy*pitchZ+sz+2],
-                      fmaf(c_weights[1], Pc[sy*pitchZ+sz-1] + Pc[sy*pitchZ+sz+1],
-                           c_weights[2]*uc));
-
-        const float lap   = r2*d2dx2 + r3*d2dy2 + r4*d2dz2;
-        const float mval  = __ldg(m + idx_m_xyz(current_x + HALO, Ypad, Zpad, nyp, nzp));
-        const float unew  = 2.0f * uc - um1 + (dt*dt) * lap / mval;
-
-        // Write output
-        u_t2_f32[g_idx] = unew;
+        const size_t out_idx = gIndex(current_x + HALO);
+        u_t2_f32[out_idx] = unew;
       }
 
-      // Ring-buffer refill with proper barriers to avoid races
-      __syncthreads();  // Ensure all warps finished reading from buffer cur%ring_size
-      const int next_x = current_x + R + UNROLL_FACTOR;
-      load_plane(cur % ring_size, next_x + HALO);
-      __syncthreads();  // Ensure refill is visible before next iteration
+      // Prefetch next plane while compute may still be in flight
+      // This overlaps memory load with register operations
+      if (do_prefetch) {
+        load_plane(cur % ring_size, prefetch_x + HALO);
+      }
+
       cur++;
     }
   }
 
-  // Tail loop for remaining iterations
   for (; x <= x1; ++x) {
       float* Pm2 = PP((cur + 0) % ring_size);
       float* Pm1 = PP((cur + 1) % ring_size);
       float* Pc  = PP((cur + 2) % ring_size);
       float* Pp1 = PP((cur + 3) % ring_size);
       float* Pp2 = PP((cur + 4) % ring_size);
+      
+      const float uc  = Pc[sy*pitchZ + sz];
+      // Read um1 from FP32 shadow to avoid FP16 quantization feedback
+      const float um1 = __ldg(u_t1_f32 + gIndex(x + HALO));
 
-      // Guard global reads with active check
+      // FMA-optimized Laplacian (better performance, symmetric weight reuse)
+      float d2dx2 = fmaf(c_weights[0], Pm2[sy*pitchZ+sz] + Pp2[sy*pitchZ+sz],
+                    fmaf(c_weights[1], Pm1[sy*pitchZ+sz] + Pp1[sy*pitchZ+sz],
+                         c_weights[2]*uc));
+      float d2dy2 = fmaf(c_weights[0], Pc[(sy-2)*pitchZ+sz] + Pc[(sy+2)*pitchZ+sz],
+                    fmaf(c_weights[1], Pc[(sy-1)*pitchZ+sz] + Pc[(sy+1)*pitchZ+sz],
+                         c_weights[2]*uc));
+      float d2dz2 = fmaf(c_weights[0], Pc[sy*pitchZ+sz-2] + Pc[sy*pitchZ+sz+2],
+                    fmaf(c_weights[1], Pc[sy*pitchZ+sz-1] + Pc[sy*pitchZ+sz+1],
+                         c_weights[2]*uc));
+      const float lap   = r2*d2dx2 + r3*d2dy2 + r4*d2dz2;
+      const float mval  = __ldg(m + idx_m_xyz(x + HALO, Ypad, Zpad, nyp, nzp));
+      const float unew  = 2.0f * uc - um1 + (dt*dt) * lap / mval;
+
+      // Only write output if this thread is in active domain
       if (active) {
-        const float uc  = Pc[sy*pitchZ + sz];
-        const size_t g_idx = gIndex(x + HALO);
-        const float um1 = __ldg(u_t1_f32 + g_idx);
-
-        // FMA-optimized Laplacian (better performance, symmetric weight reuse)
-        float d2dx2 = fmaf(c_weights[0], Pm2[sy*pitchZ+sz] + Pp2[sy*pitchZ+sz],
-                      fmaf(c_weights[1], Pm1[sy*pitchZ+sz] + Pp1[sy*pitchZ+sz],
-                           c_weights[2]*uc));
-        float d2dy2 = fmaf(c_weights[0], Pc[(sy-2)*pitchZ+sz] + Pc[(sy+2)*pitchZ+sz],
-                      fmaf(c_weights[1], Pc[(sy-1)*pitchZ+sz] + Pc[(sy+1)*pitchZ+sz],
-                           c_weights[2]*uc));
-        float d2dz2 = fmaf(c_weights[0], Pc[sy*pitchZ+sz-2] + Pc[sy*pitchZ+sz+2],
-                      fmaf(c_weights[1], Pc[sy*pitchZ+sz-1] + Pc[sy*pitchZ+sz+1],
-                           c_weights[2]*uc));
-        const float lap   = r2*d2dx2 + r3*d2dy2 + r4*d2dz2;
-        const float mval  = __ldg(m + idx_m_xyz(x + HALO, Ypad, Zpad, nyp, nzp));
-        const float unew  = 2.0f * uc - um1 + (dt*dt) * lap / mval;
-
-        // Write output
-        u_t2_f32[g_idx] = unew;
+        const size_t out_idx = gIndex(x + HALO);
+        u_t2_f32[out_idx] = unew;
       }
 
       cur++;
@@ -347,25 +379,20 @@ extern "C" int Kernel_CUDA_Optimized(
   if (ext_x <= 0 || ext_y <= 0 || ext_z <= 0) return cudaErrorInvalidValue;
 
   // Set L2 cache persistence for shadow buffers (H100 has 50MB L2)
-  int l2_cache_size_int = 0;
-  cudaError_t l2_err = cudaDeviceGetAttribute(&l2_cache_size_int, cudaDevAttrL2CacheSize, deviceid >= 0 ? deviceid : 0);
-  if (l2_err == cudaSuccess && l2_cache_size_int > 0) {
-    size_t l2_cache_size = (size_t)l2_cache_size_int;
+  size_t l2_cache_size = 0;
+  cudaDeviceGetAttribute((int*)&l2_cache_size, cudaDevAttrL2CacheSize, deviceid >= 0 ? deviceid : 0);
+  if (l2_cache_size > 0) {
     size_t persist_size = min(l2_cache_size, (size_t)(40 * 1024 * 1024));  // Use up to 40MB
-    cudaError_t limit_err = cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, persist_size);
+    cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, persist_size);
 
-    // Set persistence window for each shadow buffer separately (they're separate allocations)
-    if (limit_err == cudaSuccess) {
-      for (int i = 0; i < 3; ++i) {
-        cudaStreamAttrValue stream_attr = {};
-        stream_attr.accessPolicyWindow.base_ptr = d_shadow[i];
-        stream_attr.accessPolicyWindow.num_bytes = nPerLevel * sizeof(float);
-        stream_attr.accessPolicyWindow.hitRatio = 1.0f;  // Maximum persistence
-        stream_attr.accessPolicyWindow.hitProp = cudaAccessPropertyPersisting;
-        stream_attr.accessPolicyWindow.missProp = cudaAccessPropertyStreaming;
-        cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &stream_attr);
-      }
-    }
+    // Set persistence window for shadow buffers
+    cudaStreamAttrValue stream_attr = {};
+    stream_attr.accessPolicyWindow.base_ptr = d_shadow[0];
+    stream_attr.accessPolicyWindow.num_bytes = 3 * nPerLevel * sizeof(float);
+    stream_attr.accessPolicyWindow.hitRatio = 1.0f;  // Maximum persistence
+    stream_attr.accessPolicyWindow.hitProp = cudaAccessPropertyPersisting;
+    stream_attr.accessPolicyWindow.missProp = cudaAccessPropertyStreaming;
+    cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &stream_attr);
   }
 
   dim3 block(TZ,TY,1);
@@ -455,8 +482,16 @@ extern "C" int Kernel_CUDA_Optimized(
           src_vec->size[1], src_coords_vec->size[1]);
     }
 
-    // NO per-timestep copy/convert - stay entirely in FP32 shadow buffers
-    // Ring indexing handles time level swapping automatically
+    // Always copy shadow buffer to main array (FP32 or convert to FP16)
+#if USE_FP32_ONLY
+    cudaMemcpy(d_u_f32 + t2*nPerLevel, u_t2_output, nPerLevel*sizeof(float), cudaMemcpyDeviceToDevice);
+#else
+    // Convert ENTIRE t2 level (including ghosts) from shadow to main array
+    convert_all_f32_to_h16_kernel<<<divUp(nPerLevel,256),256>>>(
+        u_t2_output, d_u_h16 + t2*nPerLevel, nPerLevel);
+#endif
+
+    // No swap needed - ring indexing handles it automatically
   }
 
   // Single sync at end - allows full kernel overlap during loop
@@ -468,23 +503,6 @@ extern "C" int Kernel_CUDA_Optimized(
   cudaEventElapsedTime(&totalMs, eStart, eEnd);
   timers->section0 = (totalMs * 1e-3f) * (has_src ? 0.85f : 1.0f);
   timers->section1 = (totalMs * 1e-3f) * (has_src ? 0.15f : 0.0f);
-
-  // After time loop: commit final shadow buffers back to main array (ONCE)
-  const int final_t0 = time_M % 3;
-  const int final_t1 = (time_M + 2) % 3;
-  const int final_t2 = (time_M + 1) % 3;
-#if USE_FP32_ONLY
-  // Copy all 3 time levels from shadow back to main array
-  cudaMemcpy(d_u_f32 + final_t0*nPerLevel, d_shadow[final_t0], nPerLevel*sizeof(float), cudaMemcpyDeviceToDevice);
-  cudaMemcpy(d_u_f32 + final_t1*nPerLevel, d_shadow[final_t1], nPerLevel*sizeof(float), cudaMemcpyDeviceToDevice);
-  cudaMemcpy(d_u_f32 + final_t2*nPerLevel, d_shadow[final_t2], nPerLevel*sizeof(float), cudaMemcpyDeviceToDevice);
-#else
-  // Convert all 3 time levels from FP32 shadow to FP16 main array
-  convert_all_f32_to_h16_kernel<<<divUp(nPerLevel,256),256>>>(d_shadow[final_t0], d_u_h16 + final_t0*nPerLevel, nPerLevel);
-  convert_all_f32_to_h16_kernel<<<divUp(nPerLevel,256),256>>>(d_shadow[final_t1], d_u_h16 + final_t1*nPerLevel, nPerLevel);
-  convert_all_f32_to_h16_kernel<<<divUp(nPerLevel,256),256>>>(d_shadow[final_t2], d_u_h16 + final_t2*nPerLevel, nPerLevel);
-  cudaDeviceSynchronize();
-#endif
 
   // Device -> host
 #if USE_FP32_ONLY
