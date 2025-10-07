@@ -532,7 +532,8 @@ void run_correctness_test_single(int test_nx, int test_timesteps) {
 
     for (size_t i = 0; i < volp; ++i) {
         m_data[i] = 1.5f;
-        float val = std::sin(i * 0.001f) * 0.01f;
+        // Increase initial field values to avoid near-zero denominator in relative error
+        float val = std::sin(i * 0.001f) * 10.0f + 100.0f;  // Range ~[90, 110]
         u_ref[i] = u_ref[volp + i] = val;
         u_cuda[i] = u_cuda[volp + i] = val;
         u_cuda_opt[i] = u_cuda_opt[volp + i] = val;

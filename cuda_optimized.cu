@@ -49,7 +49,9 @@ __constant__ float c_weights[STENCIL_ORDER + 1] = {-1.0f/12.0f, 4.0f/3.0f, -2.5f
 #define USE_FP32_ONLY 1
 #endif
 
-__global__ void stencil_update_h100_scalar_pipelined_kernel(
+__global__
+__launch_bounds__(1024, 2)  // Max threads per block, min blocks per SM for better occupancy
+void stencil_update_h100_scalar_pipelined_kernel(
   const float* __restrict__ m,
 #if USE_FP32_ONLY
   const float* __restrict__ /*u_f32*/,     // unused - read from shadow
@@ -71,10 +73,16 @@ __global__ void stencil_update_h100_scalar_pipelined_kernel(
   const int gy = y_m + blockIdx.y * TY + threadIdx.y;
   const int x0 = x_m + blockIdx.z * XCHUNK;
   const int x1 = min(x0 + XCHUNK - 1, x_M);
-  if (gz > z_M || gy > y_M) return;
+
+  // Don't early return - all threads must participate in cooperative loading
+  const bool active = (gz >= z_m && gz <= z_M && gy >= y_m && gy <= y_M);
 
   const int Ypad = gy + HALO;
   const int Zpad = gz + HALO;
+
+  // Block-base coordinates for correct halo addressing
+  const int Zbase = Zpad - threadIdx.x;  // Z coordinate of threadIdx.x=0
+  const int Ybase = Ypad - threadIdx.y;  // Y coordinate of threadIdx.y=0
   
   extern __shared__ float smem[];
   const int pitchZ = TZ + 2*R + 1;
@@ -87,31 +95,35 @@ __global__ void stencil_update_h100_scalar_pipelined_kernel(
 
   auto load_plane = [&] __device__ (int buf, int Xpad){
     if (Xpad < 0 || Xpad >= nxp) return;
-    float* P = PP(buf);
-    const size_t c = gIndex(Xpad);
 
+    float* P = PP(buf);
     const int sy = threadIdx.y + R;
     const int sz = threadIdx.x + R;
 
-    // 1) center (every thread)
-    P[sy * pitchZ + sz] = __ldg(u_t0_f32 + c);
+    // Row base for this X-plane and Y-row (computed per thread)
+    const size_t row_base_center = ((size_t)Xpad * nyp + (size_t)Ypad) * nzp;
 
-    // 2) Z halos: let the first R threads load both left and right edges
+    // 1) Center load (every thread loads its own cell)
+    P[sy * pitchZ + sz] = __ldg(u_t0_f32 + row_base_center + (size_t)Zpad);
+
+    // 2) Z halos: use block Z base (not per-thread gz)
+    // First R threads load left and right halo columns for the entire block
     if (threadIdx.x < R) {
-      const int xh = threadIdx.x;               // 0..R-1
-      // left halo columns are [0 .. R-1]
-      P[sy * pitchZ + xh] = __ldg(u_t0_f32 + (c - (R - xh)));
-      // right halo columns are [R + TZ .. R + TZ + R - 1]
-      P[sy * pitchZ + (R + TZ + xh)] = __ldg(u_t0_f32 + (c + (xh + 1)));
+      const int zL = Zbase + threadIdx.x;           // left halo: Zbase + [0..R-1]
+      const int zR = Zbase + TZ + R + threadIdx.x;  // right halo: Zbase + TZ + R + [0..R-1]
+      P[sy * pitchZ + threadIdx.x]              = __ldg(u_t0_f32 + row_base_center + (size_t)zL);
+      P[sy * pitchZ + (R + TZ + threadIdx.x)]   = __ldg(u_t0_f32 + row_base_center + (size_t)zR);
     }
 
-    // 3) Y halos: let the first R threads load both bottom and top edges
+    // 3) Y halos: use block Y base (not per-thread gy)
+    // First R threads load bottom and top halo rows for the entire block
     if (threadIdx.y < R) {
-      const int yh = threadIdx.y;               // 0..R-1
-      // bottom halo rows are [0 .. R-1]
-      P[yh * pitchZ + sz] = __ldg(u_t0_f32 + (c - (R - yh) * nzp));
-      // top halo rows are [R + TY .. R + TY + R - 1]
-      P[(R + TY + yh) * pitchZ + sz] = __ldg(u_t0_f32 + (c + (yh + 1) * nzp));
+      const int yB = Ybase + threadIdx.y;           // bottom halo: Ybase + [0..R-1]
+      const int yT = Ybase + TY + R + threadIdx.y;  // top halo: Ybase + TY + R + [0..R-1]
+      const size_t row_base_bot = ((size_t)Xpad * nyp + (size_t)yB) * nzp;
+      const size_t row_base_top = ((size_t)Xpad * nyp + (size_t)yT) * nzp;
+      P[threadIdx.y * pitchZ + sz]              = __ldg(u_t0_f32 + row_base_bot + (size_t)Zpad);
+      P[(R + TY + threadIdx.y) * pitchZ + sz]   = __ldg(u_t0_f32 + row_base_top + (size_t)Zpad);
     }
   };
 
@@ -141,7 +153,7 @@ __global__ void stencil_update_h100_scalar_pipelined_kernel(
       // Read um1 from FP32 shadow to avoid FP16 quantization feedback
       const float um1 = __ldg(u_t1_f32 + gIndex(current_x + HALO));
 
-      // FMA-optimized Laplacian (reduces cycles, improves ILP)
+      // FMA-optimized Laplacian (better performance, symmetric weight reuse)
       float d2dx2 = fmaf(c_weights[0], Pm2[sy*pitchZ+sz] + Pp2[sy*pitchZ+sz],
                     fmaf(c_weights[1], Pm1[sy*pitchZ+sz] + Pp1[sy*pitchZ+sz],
                          c_weights[2]*uc));
@@ -156,14 +168,19 @@ __global__ void stencil_update_h100_scalar_pipelined_kernel(
       const float mval  = __ldg(m + idx_m_xyz(current_x + HALO, Ypad, Zpad, nyp, nzp));
       const float unew  = 2.0f * uc - um1 + (dt*dt) * lap / mval;
 
-      const size_t out_idx = gIndex(current_x + HALO);
-      u_t2_f32[out_idx] = unew;
-      // Don't write to main array here - will be done after kernel using shadow buffer
-      
+      // Only write output if this thread is in active domain
+      if (active) {
+        const size_t out_idx = gIndex(current_x + HALO);
+        u_t2_f32[out_idx] = unew;
+      }
+
+      // Load next plane - requires careful synchronization to avoid races
+      // Must sync before overwriting buffer and after to ensure load completes
+      __syncthreads();
       load_plane(cur % ring_size, (current_x + R + UNROLL_FACTOR) + HALO);
+      __syncthreads();
       cur++;
     }
-    __syncthreads();
   }
 
   for (; x <= x1; ++x) {
@@ -176,7 +193,8 @@ __global__ void stencil_update_h100_scalar_pipelined_kernel(
       const float uc  = Pc[sy*pitchZ + sz];
       // Read um1 from FP32 shadow to avoid FP16 quantization feedback
       const float um1 = __ldg(u_t1_f32 + gIndex(x + HALO));
-      // FMA-optimized Laplacian (reduces cycles, improves ILP)
+
+      // FMA-optimized Laplacian (better performance, symmetric weight reuse)
       float d2dx2 = fmaf(c_weights[0], Pm2[sy*pitchZ+sz] + Pp2[sy*pitchZ+sz],
                     fmaf(c_weights[1], Pm1[sy*pitchZ+sz] + Pp1[sy*pitchZ+sz],
                          c_weights[2]*uc));
@@ -189,9 +207,12 @@ __global__ void stencil_update_h100_scalar_pipelined_kernel(
       const float lap   = r2*d2dx2 + r3*d2dy2 + r4*d2dz2;
       const float mval  = __ldg(m + idx_m_xyz(x + HALO, Ypad, Zpad, nyp, nzp));
       const float unew  = 2.0f * uc - um1 + (dt*dt) * lap / mval;
-      const size_t out_idx = gIndex(x + HALO);
-      u_t2_f32[out_idx] = unew;
-      // Don't write to main array here - will be done after kernel using shadow buffer
+
+      // Only write output if this thread is in active domain
+      if (active) {
+        const size_t out_idx = gIndex(x + HALO);
+        u_t2_f32[out_idx] = unew;
+      }
 
       cur++;
   }
@@ -335,8 +356,6 @@ extern "C" int Kernel_CUDA_Optimized(
   cudaEventCreate(&eEnd);
 
   const bool has_src = (p_src_M >= p_src_m);
-  dim3 cvt_threads(8, 8, 8);
-  dim3 cvt_blocks(divUp(ext_x, 8), divUp(ext_y, 8), divUp(ext_z, 8));
 
   cudaEventRecord(eStart);
 
