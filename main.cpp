@@ -275,10 +275,11 @@ static int run_benchmark_with_tc(const char* method,
                      "TC knobs will be ignored by the backend.\n";
     }
 
-    // Grids adjusted for higher-order halos
-    const int grids[]   = {32, 64, 128, 256, 512};
+    // Extended grid sizes for detailed performance plotting
+    const int grids[]   = {32, 64, 96, 128, 192, 256, 384, 512, 640, 768};
     const int sources[] = {1};
     const int timesteps = 50;
+    // Warmup is now handled inside each kernel function (5 steps)
 
     // Geometry
     const float h_x = 0.1f, h_y = 0.1f, h_z = 0.1f;
@@ -378,15 +379,6 @@ static int run_benchmark_with_tc(const char* method,
                           << " | N=" << nfields;
             }
             std::cout << "\n";
-
-            // Warmup (1 step)
-            {
-                profiler warm{0.0, 0.0};
-                (void)kernel_func(&m_vec, &src_vec, &src_coords_vec, &u_vec,
-                                 nx-1, 0, ny-1, 0, nz-1, 0,
-                                 0.001f, 0.1f, 0.1f, 0.1f, 0.0f, 0.0f, 0.0f,
-                                 nsrc > 0 ? nsrc-1 : -1, 0, 0, 0, 0, 1, &warm);
-            }
 
             // 5 reps → stats
             std::vector<double> device_times, total_times, s0_times, s1_times;

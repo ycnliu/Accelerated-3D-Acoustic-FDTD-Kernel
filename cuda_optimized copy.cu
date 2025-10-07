@@ -28,7 +28,6 @@ static inline int divUp(int a,int b){return (a+b-1)/b;}
 #define STENCIL_ORDER 4
 #define R (STENCIL_ORDER/2)
 #define HALO (STENCIL_ORDER)
-#define WARMUP_STEPS 5  // GPU warmup iterations before timing
 
 __constant__ float c_weights[STENCIL_ORDER + 1] = {-1.0f/12.0f, 4.0f/3.0f, -2.5f, 4.0f/3.0f, -1.0f/12.0f};
 
@@ -358,41 +357,9 @@ extern "C" int Kernel_CUDA_Optimized(
 
   const bool has_src = (p_src_M >= p_src_m);
 
-  // Warmup iterations to initialize GPU caches and ensure stable timing
-  for (int time=time_m; time<time_m+WARMUP_STEPS && time<=time_M; ++time){
-    const int t0 = time % 3, t1 = (time + 2) % 3, t2 = (time + 1) % 3;
-    float* u_t0_shadow = d_shadow[t0];
-    float* u_t1_shadow = d_shadow[t1];
-    float* u_t2_output = d_shadow[t2];
-
-    stencil_update_h100_scalar_pipelined_kernel<<<grid,block,smem_bytes>>>(
-#if USE_FP32_ONLY
-        d_m, d_u_f32, d_u_f32, u_t0_shadow, u_t1_shadow, u_t2_output, nxp,nyp,nzp,
-#else
-        d_m, d_u_h16, d_u_h16, u_t0_shadow, u_t1_shadow, u_t2_output, nxp,nyp,nzp,
-#endif
-        x_m,x_M,y_m,y_M,z_m,z_M, t0,t1,t2, dt,r2,r3,r4, has_src ? 1 : 0);
-
-    if (has_src) {
-      source_inject_kernel<<<divUp(p_src_M-p_src_m+1,128),128>>>(
-          d_m,d_src,d_crd,u_t2_output, nxp,nyp,nzp, x_m,x_M,y_m,y_M,z_m,z_M,
-          h_x,h_y,h_z, o_x,o_y,o_z, p_src_m,p_src_M, time,
-          src_vec->size[1], src_coords_vec->size[1]);
-    }
-
-#if USE_FP32_ONLY
-    cudaMemcpy(d_u_f32 + t2*nPerLevel, u_t2_output, nPerLevel*sizeof(float), cudaMemcpyDeviceToDevice);
-#else
-    convert_all_f32_to_h16_kernel<<<divUp(nPerLevel,256),256>>>(
-        u_t2_output, d_u_h16 + t2*nPerLevel, nPerLevel);
-#endif
-  }
-  cudaDeviceSynchronize();  // Ensure warmup completes before timing
-
-  // Start timing after warmup
   cudaEventRecord(eStart);
 
-  for (int time=time_m+WARMUP_STEPS; time<=time_M; ++time){
+  for (int time=time_m; time<=time_M; ++time){
     const int t0 = time % 3, t1 = (time + 2) % 3, t2 = (time + 1) % 3;
 
     // Shadow buffers: read t0 (current) and t1 (previous), write t2 (new)

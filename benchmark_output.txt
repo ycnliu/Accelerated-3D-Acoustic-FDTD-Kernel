@@ -1,0 +1,520 @@
+FDTD 4th-Order Unified Benchmark
+=======================================================
+
+Configuration:
+- Stencil Order: 4
+- FLOPs/point: 36
+- Arithmetic Intensity: ~0.5625 - 0.5625 FLOPs/byte
+- GPU Device: NVIDIA H100 80GB HBM3 (CC 9.0)
+- Peak BW (device): 3352.3 GB/s
+- Peak FP32 (device): 66908.2 GFLOP/s
+
+
+================================================================================
+STEP 1: CORRECTNESS VERIFICATION
+================================================================================
+
+================================================================================
+CORRECTNESS TEST - Comparing All Implementations
+================================================================================
+
+Testing 5 grid sizes...
+
+--------------------------------------------------------------------------------
+
+Test configuration: 32x32x32 grid, 50 timesteps
+Running OpenACC (reference)...
+Running CUDA...
+Running CUDA_Optimized...
+[CUDA_Optimized_Final] Grid=(1,2,1) Block=(64,16,1) XCHUNK=64 UNROLL=4
+[CUDA_Optimized_Final] Shared memory request: 44160 bytes
+
+=== Comparison Results ===
+CUDA vs OpenACC:
+  Max absolute difference: 2.05e-01
+  Max relative difference: 3.87e-05
+  L2 norm error: 8.60e-06
+  NaN count: 0
+  Inf count: 0
+
+Result: ✗ FAIL
+  Error exceeds tolerance (1.00e-04)
+
+CUDA_Optimized vs OpenACC:
+  Max absolute difference: 3.86e+00
+  Max relative difference: 6.94e-04
+  L2 norm error: 8.36e-05
+  NaN count: 0
+  Inf count: 0
+
+Result: ✗ FAIL
+  Error exceeds tolerance (1.00e-04)
+
+--------------------------------------------------------------------------------
+
+Test configuration: 64x64x64 grid, 50 timesteps
+Running OpenACC (reference)...
+Running CUDA...
+Running CUDA_Optimized...
+
+=== Comparison Results ===
+CUDA vs OpenACC:
+  Max absolute difference: 2.24e-01
+  Max relative difference: 4.04e-05
+  L2 norm error: 1.11e-05
+  NaN count: 0
+  Inf count: 0
+
+Result: ✗ FAIL
+  Error exceeds tolerance (1.00e-04)
+
+CUDA_Optimized vs OpenACC:
+  Max absolute difference: 3.86e+00
+  Max relative difference: 7.04e-04
+  L2 norm error: 5.95e-05
+  NaN count: 0
+  Inf count: 0
+
+Result: ✗ FAIL
+  Error exceeds tolerance (1.00e-04)
+
+--------------------------------------------------------------------------------
+
+Test configuration: 128x128x128 grid, 50 timesteps
+Running OpenACC (reference)...
+Running CUDA...
+Running CUDA_Optimized...
+
+=== Comparison Results ===
+CUDA vs OpenACC:
+  Max absolute difference: 1.53e-01
+  Max relative difference: 3.26e-05
+  L2 norm error: 8.41e-06
+  NaN count: 0
+  Inf count: 0
+
+Result: ✗ FAIL
+  Error exceeds tolerance (1.00e-04)
+
+CUDA_Optimized vs OpenACC:
+  Max absolute difference: 3.91e+00
+  Max relative difference: 7.01e-04
+  L2 norm error: 4.20e-05
+  NaN count: 0
+  Inf count: 0
+
+Result: ✗ FAIL
+  Error exceeds tolerance (1.00e-04)
+
+--------------------------------------------------------------------------------
+
+Test configuration: 256x256x256 grid, 50 timesteps
+Running OpenACC (reference)...
+Running CUDA...
+Running CUDA_Optimized...
+
+=== Comparison Results ===
+CUDA vs OpenACC:
+  Max absolute difference: 1.83e-01
+  Max relative difference: 3.53e-05
+  L2 norm error: 9.69e-06
+  NaN count: 0
+  Inf count: 0
+
+Result: ✗ FAIL
+  Error exceeds tolerance (1.00e-04)
+
+CUDA_Optimized vs OpenACC:
+  Max absolute difference: 3.94e+00
+  Max relative difference: 7.09e-04
+  L2 norm error: 3.09e-05
+  NaN count: 0
+  Inf count: 0
+
+Result: ✗ FAIL
+  Error exceeds tolerance (1.00e-04)
+
+--------------------------------------------------------------------------------
+
+Test configuration: 512x512x512 grid, 50 timesteps
+Running OpenACC (reference)...
+Running CUDA...
+Running CUDA_Optimized...
+
+=== Comparison Results ===
+CUDA vs OpenACC:
+  Max absolute difference: 1.90e-01
+  Max relative difference: 3.68e-05
+  L2 norm error: 8.67e-06
+  NaN count: 0
+  Inf count: 0
+
+Result: ✗ FAIL
+  Error exceeds tolerance (1.00e-04)
+
+CUDA_Optimized vs OpenACC:
+  Max absolute difference: 3.92e+00
+  Max relative difference: 7.24e-04
+  L2 norm error: 2.42e-05
+  NaN count: 0
+  Inf count: 0
+
+Result: ✗ FAIL
+  Error exceeds tolerance (1.00e-04)
+
+================================================================================
+All correctness tests complete!
+================================================================================
+
+
+================================================================================
+STEP 2: PERFORMANCE BENCHMARK
+================================================================================
+
+=== OpenACC ===
+Running OpenACC FDTD (4th-order)...
+Grid: 32x32x32 | Steps: 50 | Sources: 1 | AI: 5.62e-01 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   1.36e+00 ± 4.32e-02 ms
+Device time:  9.42e-01 ± 4.21e-03 ms  (section0=4.66e-01±2.24e-03ms, section1=4.75e-01±4.84e-03ms)
+Overhead:     4.14e-01 ± 3.91e-02 ms  (init/copies/launch)
+Perf:         6.26e+01 ± 2.79e-01 GFLOP/s,  1.11e+02 ± 4.95e-01 GB/s
+GPU Analysis: 0.1% compute, 3.3% memory BW efficiency
+Status:       Optimization opportunity (3.3% peak utilization)
+Max field value: 0.1
+
+Running OpenACC FDTD (4th-order)...
+Grid: 64x64x64 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   2.1 ± 0.0 ms
+Device time:  1.1 ± 0.0 ms  (section0=0.6±0.0ms, section1=0.5±0.0ms)
+Overhead:     1.0 ± 0.0 ms  (init/copies/launch)
+Perf:         444.8 ± 3.9 GFLOP/s,  790.8 ± 6.9 GB/s
+GPU Analysis: 0.7% compute, 23.6% memory BW efficiency
+Status:       Optimization opportunity (23.6% peak utilization)
+Max field value: 0.1
+
+Running OpenACC FDTD (4th-order)...
+Grid: 96x96x96 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   4.3 ± 0.7 ms
+Device time:  1.4 ± 0.0 ms  (section0=0.9±0.0ms, section1=0.5±0.0ms)
+Overhead:     3.0 ± 0.7 ms  (init/copies/launch)
+Perf:         1160.1 ± 3.7 GFLOP/s,  2062.3 ± 6.5 GB/s
+GPU Analysis: 1.7% compute, 61.5% memory BW efficiency
+Status:       Optimization opportunity (61.5% peak utilization)
+Max field value: 0.1
+
+Running OpenACC FDTD (4th-order)...
+Grid: 128x128x128 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   7.7 ± 0.1 ms
+Device time:  2.1 ± 0.0 ms  (section0=1.6±0.0ms, section1=0.5±0.0ms)
+Overhead:     5.6 ± 0.1 ms  (init/copies/launch)
+Perf:         1767.9 ± 3.9 GFLOP/s,  3143.0 ± 7.0 GB/s
+GPU Analysis: 2.6% compute, 93.8% memory BW efficiency
+Status:       Memory-bound (optimal for this workload)
+Max field value: 0.1
+
+Running OpenACC FDTD (4th-order)...
+Grid: 192x192x192 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   22.6 ± 0.2 ms
+Device time:  4.9 ± 0.0 ms  (section0=4.4±0.0ms, section1=0.5±0.0ms)
+Overhead:     17.7 ± 0.2 ms  (init/copies/launch)
+Perf:         2583.3 ± 1.8 GFLOP/s,  4592.5 ± 3.2 GB/s
+GPU Analysis: 3.9% compute, 137.0% memory BW efficiency
+Status:       Memory-bound (optimal for this workload)
+Max field value: 0.1
+
+Running OpenACC FDTD (4th-order)...
+Grid: 256x256x256 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   50.3 ± 0.1 ms
+Device time:  10.3 ± 0.0 ms  (section0=9.8±0.0ms, section1=0.5±0.0ms)
+Overhead:     39.9 ± 0.1 ms  (init/copies/launch)
+Perf:         2921.0 ± 1.1 GFLOP/s,  5192.9 ± 1.9 GB/s
+GPU Analysis: 4.4% compute, 154.9% memory BW efficiency
+Status:       Memory-bound (optimal for this workload)
+Max field value: 0.1
+
+Running OpenACC FDTD (4th-order)...
+Grid: 384x384x384 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   163.2 ± 0.5 ms
+Device time:  32.5 ± 0.0 ms  (section0=32.0±0.0ms, section1=0.5±0.0ms)
+Overhead:     130.7 ± 0.5 ms  (init/copies/launch)
+Perf:         3135.1 ± 0.3 GFLOP/s,  5573.5 ± 0.5 GB/s
+GPU Analysis: 4.7% compute, 166.3% memory BW efficiency
+Status:       Memory-bound (optimal for this workload)
+Max field value: 0.1
+
+Running OpenACC FDTD (4th-order)...
+Grid: 512x512x512 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   380.1 ± 0.3 ms
+Device time:  75.7 ± 0.0 ms  (section0=75.2±0.0ms, section1=0.5±0.0ms)
+Overhead:     304.5 ± 0.3 ms  (init/copies/launch)
+Perf:         3192.6 ± 0.3 GFLOP/s,  5675.7 ± 0.5 GB/s
+GPU Analysis: 4.8% compute, 169.3% memory BW efficiency
+Status:       Memory-bound (optimal for this workload)
+Max field value: 0.1
+
+Running OpenACC FDTD (4th-order)...
+Grid: 640x640x640 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   736.2 ± 0.9 ms
+Device time:  146.9 ± 0.0 ms  (section0=146.3±0.0ms, section1=0.5±0.0ms)
+Overhead:     589.3 ± 0.9 ms  (init/copies/launch)
+Perf:         3212.9 ± 0.7 GFLOP/s,  5711.8 ± 1.3 GB/s
+GPU Analysis: 4.8% compute, 170.4% memory BW efficiency
+Status:       Memory-bound (optimal for this workload)
+Max field value: 0.1
+
+Running OpenACC FDTD (4th-order)...
+Grid: 768x768x768 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   1264.8 ± 1.5 ms
+Device time:  253.6 ± 0.2 ms  (section0=253.0±0.2ms, section1=0.5±0.0ms)
+Overhead:     1011.3 ± 1.6 ms  (init/copies/launch)
+Perf:         3215.7 ± 2.1 GFLOP/s,  5716.8 ± 3.7 GB/s
+GPU Analysis: 4.8% compute, 170.5% memory BW efficiency
+Status:       Memory-bound (optimal for this workload)
+Max field value: 0.1
+
+=== CUDA (Plain) ===
+Running CUDA FDTD (4th-order)...
+Grid: 32x32x32 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   1.5 ± 0.1 ms
+Device time:  0.9 ± 0.0 ms  (section0=0.5±0.0ms, section1=0.4±0.0ms)
+Overhead:     0.7 ± 0.1 ms  (init/copies/launch)
+Perf:         68.8 ± 0.4 GFLOP/s,  122.3 ± 0.7 GB/s
+GPU Analysis: 0.1% compute, 3.6% memory BW efficiency
+Status:       Optimization opportunity (3.6% peak utilization)
+Max field value: 0.1
+
+Running CUDA FDTD (4th-order)...
+Grid: 64x64x64 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   2.6 ± 0.1 ms
+Device time:  1.1 ± 0.0 ms  (section0=0.8±0.0ms, section1=0.4±0.0ms)
+Overhead:     1.5 ± 0.1 ms  (init/copies/launch)
+Perf:         414.2 ± 3.6 GFLOP/s,  736.4 ± 6.4 GB/s
+GPU Analysis: 0.6% compute, 22.0% memory BW efficiency
+Status:       Optimization opportunity (22.0% peak utilization)
+Max field value: 0.1
+
+Running CUDA FDTD (4th-order)...
+Grid: 96x96x96 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   5.1 ± 0.1 ms
+Device time:  2.0 ± 0.0 ms  (section0=1.6±0.0ms, section1=0.4±0.0ms)
+Overhead:     3.1 ± 0.1 ms  (init/copies/launch)
+Perf:         788.8 ± 1.5 GFLOP/s,  1402.3 ± 2.6 GB/s
+GPU Analysis: 1.2% compute, 41.8% memory BW efficiency
+Status:       Optimization opportunity (41.8% peak utilization)
+Max field value: 0.1
+
+Running CUDA FDTD (4th-order)...
+Grid: 128x128x128 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   9.7 ± 0.2 ms
+Device time:  3.6 ± 0.0 ms  (section0=3.2±0.0ms, section1=0.4±0.0ms)
+Overhead:     6.2 ± 0.2 ms  (init/copies/launch)
+Perf:         1051.9 ± 0.6 GFLOP/s,  1870.1 ± 1.1 GB/s
+GPU Analysis: 1.6% compute, 55.8% memory BW efficiency
+Status:       Optimization opportunity (55.8% peak utilization)
+Max field value: 0.1
+
+Running CUDA FDTD (4th-order)...
+Grid: 192x192x192 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   29.3 ± 0.1 ms
+Device time:  10.6 ± 0.0 ms  (section0=10.2±0.0ms, section1=0.4±0.0ms)
+Overhead:     18.8 ± 0.1 ms  (init/copies/launch)
+Perf:         1206.1 ± 0.6 GFLOP/s,  2144.2 ± 1.1 GB/s
+GPU Analysis: 1.8% compute, 64.0% memory BW efficiency
+Status:       Optimization opportunity (64.0% peak utilization)
+Max field value: 0.1
+
+Running CUDA FDTD (4th-order)...
+Grid: 256x256x256 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   75.1 ± 0.1 ms
+Device time:  32.0 ± 0.0 ms  (section0=31.5±0.0ms, section1=0.4±0.0ms)
+Overhead:     43.1 ± 0.1 ms  (init/copies/launch)
+Perf:         944.7 ± 0.2 GFLOP/s,  1679.5 ± 0.4 GB/s
+GPU Analysis: 1.4% compute, 50.1% memory BW efficiency
+Status:       Optimization opportunity (50.1% peak utilization)
+Max field value: 0.1
+
+Running CUDA FDTD (4th-order)...
+Grid: 384x384x384 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   272.2 ± 0.1 ms
+Device time:  129.4 ± 0.0 ms  (section0=129.0±0.0ms, section1=0.4±0.0ms)
+Overhead:     142.8 ± 0.1 ms  (init/copies/launch)
+Perf:         787.5 ± 0.1 GFLOP/s,  1400.0 ± 0.2 GB/s
+GPU Analysis: 1.2% compute, 41.8% memory BW efficiency
+Status:       Optimization opportunity (41.8% peak utilization)
+Max field value: 0.1
+
+Running CUDA FDTD (4th-order)...
+Grid: 512x512x512 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   631.0 ± 0.4 ms
+Device time:  298.9 ± 0.1 ms  (section0=298.5±0.1ms, section1=0.4±0.0ms)
+Overhead:     332.0 ± 0.4 ms  (init/copies/launch)
+Perf:         808.2 ± 0.1 GFLOP/s,  1436.7 ± 0.2 GB/s
+GPU Analysis: 1.2% compute, 42.9% memory BW efficiency
+Status:       Optimization opportunity (42.9% peak utilization)
+Max field value: 0.1
+
+Running CUDA FDTD (4th-order)...
+Grid: 640x640x640 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   1232.0 ± 0.5 ms
+Device time:  588.3 ± 0.1 ms  (section0=587.9±0.1ms, section1=0.4±0.0ms)
+Overhead:     643.7 ± 0.5 ms  (init/copies/launch)
+Perf:         802.1 ± 0.1 GFLOP/s,  1426.0 ± 0.2 GB/s
+GPU Analysis: 1.2% compute, 42.5% memory BW efficiency
+Status:       Optimization opportunity (42.5% peak utilization)
+Max field value: 0.1
+
+Running CUDA FDTD (4th-order)...
+Grid: 768x768x768 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=0 | T=1 | N=1
+Total time:   2112.9 ± 0.2 ms
+Device time:  1008.5 ± 0.1 ms  (section0=1008.1±0.1ms, section1=0.4±0.0ms)
+Overhead:     1104.4 ± 0.2 ms  (init/copies/launch)
+Perf:         808.5 ± 0.1 GFLOP/s,  1437.3 ± 0.1 GB/s
+GPU Analysis: 1.2% compute, 42.9% memory BW efficiency
+Status:       Optimization opportunity (42.9% peak utilization)
+Max field value: 0.1
+
+=== CUDA_Optimized ===
+[warn] FDTD_SetRuntimeConfig() not found in kernel object; TC knobs will be ignored by the backend.
+Running CUDA_Optimized FDTD (4th-order)...
+Grid: 32x32x32 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=1 | T=1 | N=1
+Total time:   3.2 ± 1.1 ms
+Device time:  1.8 ± 0.0 ms  (section0=1.5±0.0ms, section1=0.3±0.0ms)
+Overhead:     1.4 ± 1.1 ms  (init/copies/launch)
+Perf:         32.6 ± 0.0 GFLOP/s,  10.9 ± 0.0 GB/s
+GPU Analysis: 0.0% compute, 0.3% memory BW efficiency
+Status:       Optimization opportunity (0.3% peak utilization)
+Max field value: 0.1
+
+Running CUDA_Optimized FDTD (4th-order)...
+Grid: 64x64x64 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=1 | T=1 | N=1
+Total time:   6.1 ± 0.1 ms
+Device time:  3.4 ± 0.0 ms  (section0=2.9±0.0ms, section1=0.5±0.0ms)
+Overhead:     2.8 ± 0.1 ms  (init/copies/launch)
+Perf:         140.4 ± 0.0 GFLOP/s,  46.8 ± 0.0 GB/s
+GPU Analysis: 0.2% compute, 1.4% memory BW efficiency
+Status:       Optimization opportunity (1.4% peak utilization)
+Max field value: 0.1
+
+Running CUDA_Optimized FDTD (4th-order)...
+Grid: 96x96x96 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=1 | T=1 | N=1
+Total time:   8.6 ± 0.1 ms
+Device time:  3.8 ± 0.0 ms  (section0=3.2±0.0ms, section1=0.6±0.0ms)
+Overhead:     4.8 ± 0.1 ms  (init/copies/launch)
+Perf:         418.0 ± 0.7 GFLOP/s,  139.3 ± 0.2 GB/s
+GPU Analysis: 0.6% compute, 4.2% memory BW efficiency
+Status:       Optimization opportunity (4.2% peak utilization)
+Max field value: 0.1
+
+Running CUDA_Optimized FDTD (4th-order)...
+Grid: 128x128x128 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=1 | T=1 | N=1
+Total time:   14.4 ± 0.3 ms
+Device time:  5.5 ± 0.0 ms  (section0=4.7±0.0ms, section1=0.8±0.0ms)
+Overhead:     8.9 ± 0.3 ms  (init/copies/launch)
+Perf:         687.1 ± 1.1 GFLOP/s,  229.0 ± 0.4 GB/s
+GPU Analysis: 1.0% compute, 6.8% memory BW efficiency
+Status:       Optimization opportunity (6.8% peak utilization)
+Max field value: 0.1
+
+Running CUDA_Optimized FDTD (4th-order)...
+Grid: 192x192x192 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=1 | T=1 | N=1
+Total time:   34.9 ± 0.2 ms
+Device time:  7.5 ± 0.0 ms  (section0=6.4±0.0ms, section1=1.1±0.0ms)
+Overhead:     27.4 ± 0.2 ms  (init/copies/launch)
+Perf:         1695.7 ± 1.2 GFLOP/s,  565.2 ± 0.4 GB/s
+GPU Analysis: 2.5% compute, 16.9% memory BW efficiency
+Status:       Optimization opportunity (16.9% peak utilization)
+Max field value: 0.1
+
+Running CUDA_Optimized FDTD (4th-order)...
+Grid: 256x256x256 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=1 | T=1 | N=1
+Total time:   71.4 ± 0.1 ms
+Device time:  10.4 ± 0.0 ms  (section0=8.9±0.0ms, section1=1.6±0.0ms)
+Overhead:     61.0 ± 0.1 ms  (init/copies/launch)
+Perf:         2890.3 ± 0.6 GFLOP/s,  963.4 ± 0.2 GB/s
+GPU Analysis: 4.3% compute, 28.7% memory BW efficiency
+Status:       Optimization opportunity (28.7% peak utilization)
+Max field value: 0.1
+
+Running CUDA_Optimized FDTD (4th-order)...
+Grid: 384x384x384 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=1 | T=1 | N=1
+Total time:   232.0 ± 0.3 ms
+Device time:  34.9 ± 0.0 ms  (section0=29.7±0.0ms, section1=5.2±0.0ms)
+Overhead:     197.1 ± 0.3 ms  (init/copies/launch)
+Perf:         2916.8 ± 1.5 GFLOP/s,  972.3 ± 0.5 GB/s
+GPU Analysis: 4.4% compute, 29.0% memory BW efficiency
+Status:       Optimization opportunity (29.0% peak utilization)
+Max field value: 0.1
+
+Running CUDA_Optimized FDTD (4th-order)...
+Grid: 512x512x512 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=1 | T=1 | N=1
+Total time:   534.5 ± 0.3 ms
+Device time:  76.5 ± 0.0 ms  (section0=65.0±0.0ms, section1=11.5±0.0ms)
+Overhead:     458.0 ± 0.3 ms  (init/copies/launch)
+Perf:         3158.9 ± 0.4 GFLOP/s,  1053.0 ± 0.1 GB/s
+GPU Analysis: 4.7% compute, 31.4% memory BW efficiency
+Status:       Optimization opportunity (31.4% peak utilization)
+Max field value: 0.1
+
+Running CUDA_Optimized FDTD (4th-order)...
+Grid: 640x640x640 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=1 | T=1 | N=1
+Total time:   1037.0 ± 0.4 ms
+Device time:  150.4 ± 0.0 ms  (section0=127.8±0.0ms, section1=22.6±0.0ms)
+Overhead:     886.6 ± 0.4 ms  (init/copies/launch)
+Perf:         3137.5 ± 0.2 GFLOP/s,  1045.8 ± 0.1 GB/s
+GPU Analysis: 4.7% compute, 31.2% memory BW efficiency
+Status:       Optimization opportunity (31.2% peak utilization)
+Max field value: 0.1
+
+Running CUDA_Optimized FDTD (4th-order)...
+Grid: 768x768x768 | Steps: 50 | Sources: 1 | AI: 0.6 FLOPs/byte | TC=1 | T=1 | N=1
+Total time:   1779.5 ± 0.9 ms
+Device time:  257.0 ± 0.0 ms  (section0=218.5±0.0ms, section1=38.6±0.0ms)
+Overhead:     1522.5 ± 0.9 ms  (init/copies/launch)
+Perf:         3172.6 ± 0.4 GFLOP/s,  1057.5 ± 0.1 GB/s
+GPU Analysis: 4.7% compute, 31.5% memory BW efficiency
+Status:       Optimization opportunity (31.5% peak utilization)
+Max field value: 0.1
+
+
+================================================================================
+STEP 3: RESULTS SUMMARY
+================================================================================
+
+Method,Total_Time(ms),Total_Std(ms),Section0_Time(ms),Section0_Std(ms),Section1_Time(ms),Section1_Std(ms),Device_Time(ms),Device_Std(ms),Overhead(ms),Overhead_Std(ms),GFLOPS,GFLOPS_Std,GBps,GBps_Std,Compute_Eff(%),Memory_Eff(%),AI,NX,NY,NZ,Timesteps,Sources,StencilOrder
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+OpenACC,1.356,0.0431602,0.4664,0.00224499,0.4754,0.00484149,0.9418,0.00421426,0.4142,0.0391326,62.6286,0.278633,111.34,0.495347,0.0936038,3.32127,0.5625,32,32,32,50,1,4
+OpenACC,2.078,0.0315151,0.5826,0.00703136,0.4782,0.00541849,1.0608,0.00908625,1.0172,0.025459,444.848,3.8552,790.84,6.85369,0.664863,23.5908,0.5625,64,64,64,50,1,4
+OpenACC,4.3252,0.734511,0.9064,0.00215407,0.4664,0.00402989,1.3728,0.00435431,2.9524,0.73283,1160.07,3.68426,2062.34,6.54979,1.73382,61.5199,0.5625,96,96,96,50,1,4
+OpenACC,7.7286,0.134592,1.6316,0.00431741,0.5036,0.00174356,2.1352,0.00474974,5.5934,0.133869,1767.93,3.93288,3142.99,6.99178,2.64233,93.7558,0.5625,128,128,128,50,1,4
+OpenACC,22.5944,0.19576,4.4208,0.00479166,0.511,0.00260768,4.9318,0.00342929,17.6626,0.196714,2583.28,1.79508,4592.49,3.19126,3.86093,136.994,0.5625,192,192,192,50,1,4
+OpenACC,50.276,0.075834,9.827,0.00126491,0.5116,0.00313688,10.3386,0.00372022,39.9374,0.0760147,2920.99,1.05136,5192.88,1.86909,4.36568,154.904,0.5625,256,256,256,50,1,4
+OpenACC,163.219,0.49434,31.9978,0.00299333,0.5122,0.00305941,32.51,0.00282843,130.709,0.492044,3135.08,0.272739,5573.48,0.484869,4.68565,166.257,0.5625,384,384,384,50,1,4
+OpenACC,380.123,0.319892,75.1566,0.0051614,0.5162,0.00365513,75.6728,0.00711056,304.451,0.324229,3192.59,0.299997,5675.71,0.533328,4.77159,169.307,0.5625,512,512,512,50,1,4
+OpenACC,736.175,0.904748,146.349,0.0339211,0.5158,0.00396989,146.864,0.0334879,589.31,0.913216,3212.89,0.732375,5711.81,1.302,4.80194,170.384,0.5625,640,640,640,50,1,4
+OpenACC,1264.83,1.49327,253.05,0.163929,0.5118,0.000748331,253.561,0.164032,1011.27,1.62604,3215.68,2.08067,5716.77,3.69898,4.80611,170.532,0.5625,768,768,768,50,1,4
+CUDA,1.5388,0.147034,0.4782,0.00278568,0.3794,0.00372022,0.8576,0.00492341,0.6812,0.143456,68.7784,0.394173,122.273,0.700752,0.102795,3.6474,0.5625,32,32,32,50,1,4
+CUDA,2.6216,0.0578086,0.7586,0.00538888,0.3806,0.00900222,1.1392,0.00984683,1.4824,0.0545989,414.234,3.62214,736.415,6.43937,0.619108,21.9673,0.5625,64,64,64,50,1,4
+CUDA,5.1046,0.0906214,1.6482,0.00511468,0.3708,0.00213542,2.019,0.00374166,3.0856,0.0933501,788.772,1.46084,1402.26,2.59705,1.17889,41.8296,0.5625,96,96,96,50,1,4
+CUDA,9.7444,0.168108,3.1738,0.00430813,0.4148,0.00318748,3.5886,0.00205913,6.1558,0.167318,1051.91,0.603821,1870.06,1.07346,1.57217,55.784,0.5625,128,128,128,50,1,4
+CUDA,29.3414,0.130872,10.151,0.00586515,0.4118,0.00248193,10.5628,0.0056356,18.7786,0.131992,1206.14,0.64343,2144.25,1.14388,1.80268,63.9631,0.5625,192,192,192,50,1,4
+CUDA,75.0846,0.101261,31.549,0.0114193,0.4174,0.00691665,31.9664,0.00801499,43.1182,0.102341,944.71,0.236811,1679.49,0.420997,1.41195,50.0992,0.5625,256,256,256,50,1,4
+CUDA,272.219,0.0921186,129.011,0.017702,0.4154,0.00287054,129.426,0.0174516,142.793,0.0839938,787.488,0.106181,1399.98,0.188766,1.17697,41.7615,0.5625,384,384,384,50,1,4
+CUDA,630.956,0.383228,298.518,0.0514222,0.4246,0.00496387,298.943,0.0514237,332.013,0.372873,808.154,0.139027,1436.72,0.247159,1.20786,42.8574,0.5625,512,512,512,50,1,4
+CUDA,1231.98,0.487467,587.859,0.0836172,0.4204,0.00332265,588.28,0.0856537,643.699,0.458165,802.1,0.116793,1425.96,0.207632,1.19881,42.5364,0.5625,640,640,640,50,1,4
+CUDA,2112.87,0.244332,1008.09,0.0922939,0.4256,0.0088227,1008.51,0.0950465,1104.36,0.204959,808.491,0.0762032,1437.32,0.135472,1.20836,42.8753,0.5625,768,768,768,50,1,4
+CUDA_Optimized,3.1876,1.08786,1.53728,0.00130781,0.271285,0.00023079,1.80857,0.0015386,1.37903,1.08681,32.6128,0.0277431,10.8709,0.0092477,0.0487426,0.32428,0.5625,32,32,32,50,1,4
+CUDA_Optimized,6.1384,0.0877123,2.85615,0.000918417,0.504026,0.000162078,3.36017,0.00108049,2.77823,0.0878807,140.427,0.0451384,46.809,0.0150461,0.20988,1.39632,0.5625,64,64,64,50,1,4
+CUDA_Optimized,8.5746,0.14244,3.23805,0.00562657,0.57142,0.000992936,3.80947,0.0066195,4.76513,0.145764,418.045,0.726184,139.348,0.242061,0.624805,4.15678,0.5625,96,96,96,50,1,4
+CUDA_Optimized,14.437,0.318072,4.66985,0.00736126,0.824092,0.00129904,5.49395,0.0086603,8.94305,0.323185,687.099,1.0836,229.033,0.361199,1.02693,6.83207,0.5625,128,128,128,50,1,4
+CUDA_Optimized,34.8698,0.211733,6.3862,0.00446752,1.12698,0.000788371,7.51318,0.00525589,27.3566,0.206872,1695.71,1.18589,565.238,0.395298,2.53439,16.8611,0.5625,192,192,192,50,1,4
+CUDA_Optimized,71.4474,0.0883914,8.88102,0.00179035,1.56724,0.00031591,10.4483,0.00210626,60.9991,0.0885197,2890.34,0.582743,963.446,0.194248,4.31986,28.7397,0.5625,256,256,256,50,1,4
+CUDA_Optimized,232.049,0.31737,29.7019,0.0148345,5.24151,0.00261774,34.9434,0.0174523,197.105,0.321715,2916.76,1.4562,972.254,0.485399,4.35935,29.0024,0.5625,384,384,384,50,1,4
+CUDA_Optimized,534.479,0.323078,65.0074,0.00787555,11.4719,0.00139014,76.4793,0.00926569,458,0.314705,3158.92,0.382704,1052.97,0.127568,4.72128,31.4103,0.5625,512,512,512,50,1,4
+CUDA_Optimized,1036.99,0.397513,127.835,0.00803474,22.5592,0.00141789,150.394,0.00945263,886.591,0.402593,3137.48,0.197206,1045.83,0.0657354,4.68923,31.1971,0.5625,640,640,640,50,1,4
+CUDA_Optimized,1779.49,0.896892,218.451,0.0269309,38.5502,0.00475234,257.001,0.0316832,1522.49,0.898485,3172.64,0.391162,1057.55,0.130387,4.74178,31.5467,0.5625,768,768,768,50,1,4
+
+=== Complete ===
+✓ Correctness tests passed
+✓ Performance benchmarks written to benchmark.csv
+✓ Use 'make show-results' to view CSV data
+
