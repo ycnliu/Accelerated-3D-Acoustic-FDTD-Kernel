@@ -4,13 +4,9 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
-#include <cooperative_groups.h>
-#include <cooperative_groups/memcpy_async.h>
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
-
-namespace cg = cooperative_groups;
 
 // -------- ABI and helpers --------
 struct dataobj { void* data; int* size; unsigned long nbytes; unsigned long* npsize; unsigned long* dsize; int* hsize; int* hofs; int* oofs; void* dmap; };
@@ -174,13 +170,6 @@ void stencil_update_h100_scalar_pipelined_kernel(
   int cur = 0;  // Start at x-2 plane (buffer 0 holds x0-2)
 
   int x = x0;
-
-  // Software pipelining: Prefetch first plane for iteration 0
-  int next_load_x = x + UNROLL_FACTOR;
-  if (next_load_x <= x1) {
-    load_plane((cur + UNROLL_FACTOR) % ring_size, (next_load_x + R) + HALO);
-  }
-
   for (; x <= x1 - (UNROLL_FACTOR-1); x += UNROLL_FACTOR){
 
     #pragma unroll
@@ -191,14 +180,7 @@ void stencil_update_h100_scalar_pipelined_kernel(
       float* Pc  = PP((cur + 2) % ring_size);
       float* Pp1 = PP((cur + 3) % ring_size);
       float* Pp2 = PP((cur + 4) % ring_size);
-
-      // Start async load of next plane BEFORE compute (software pipelining)
-      const int prefetch_x = current_x + R + UNROLL_FACTOR;
-      bool do_prefetch = (prefetch_x + HALO < nxp);
-
-      __syncthreads();  // Ensure previous iteration complete
-
-      // Compute current iteration
+      
       const float uc  = Pc[sy*pitchZ + sz];
       // Read um1 from FP32 shadow to avoid FP16 quantization feedback
       const float um1 = __ldg(u_t1_f32 + gIndex(current_x + HALO));
@@ -213,7 +195,7 @@ void stencil_update_h100_scalar_pipelined_kernel(
       float d2dz2 = fmaf(c_weights[0], Pc[sy*pitchZ+sz-2] + Pc[sy*pitchZ+sz+2],
                     fmaf(c_weights[1], Pc[sy*pitchZ+sz-1] + Pc[sy*pitchZ+sz+1],
                          c_weights[2]*uc));
-
+      
       const float lap   = r2*d2dx2 + r3*d2dy2 + r4*d2dz2;
       const float mval  = __ldg(m + idx_m_xyz(current_x + HALO, Ypad, Zpad, nyp, nzp));
       const float unew  = 2.0f * uc - um1 + (dt*dt) * lap / mval;
@@ -224,12 +206,11 @@ void stencil_update_h100_scalar_pipelined_kernel(
         u_t2_f32[out_idx] = unew;
       }
 
-      // Prefetch next plane while compute may still be in flight
-      // This overlaps memory load with register operations
-      if (do_prefetch) {
-        load_plane(cur % ring_size, prefetch_x + HALO);
-      }
-
+      // Load next plane - requires careful synchronization to avoid races
+      // Must sync before overwriting buffer and after to ensure load completes
+      __syncthreads();
+      load_plane(cur % ring_size, (current_x + R + UNROLL_FACTOR) + HALO);
+      __syncthreads();
       cur++;
     }
   }
