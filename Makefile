@@ -9,7 +9,7 @@ NVCC = $(NVHPC_PATH)/nvcc
 # H100 = Hopper (sm_90 / cc90) - default for ConvStencil optimization
 # RTX 2080 Ti = Turing (sm_75 / cc75)
 # Set GPU_ARCH=sm_75 for 2080 Ti, GPU_ARCH=sm_90 for H100
-GPU_ARCH      ?= sm_90
+GPU_ARCH      ?= sm_75
 CUDA_ARCH_SM   = $(GPU_ARCH)
 NVHPC_CC       = $(subst sm_,cc,$(GPU_ARCH))
 
