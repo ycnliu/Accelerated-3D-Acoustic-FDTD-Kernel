@@ -1,4 +1,11 @@
 # Compiled objects and executables
+
+# Project generated files
+benchmark_output.txt
+generate_plots.py
+kronos.tex
+figs/
+*.tex
 *.o
 *.exe
 comprehensive_benchmark
