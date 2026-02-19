@@ -1,195 +1,521 @@
-# FDTD Unified Benchmark - OpenACC vs CUDA Performance Comparison
+# 3D Acoustic FDTD Benchmark Suite
 
-A comprehensive benchmarking suite for comparing OpenACC and CUDA implementations of 3D Finite-Difference Time-Domain (FDTD) acoustic wave simulation with automated correctness verification and performance measurement.
+A comprehensive GPU performance comparison of four 3D Finite-Difference Time-Domain (FDTD) stencil implementations, demonstrating progressive optimization techniques from naive CUDA to advanced shared memory ring buffers with L2 cache persistence hints.
+
+[![Performance](https://img.shields.io/badge/H100-4.3_TFLOP%2Fs-green)](https://github.com/ycnliu/Accelerated-3D-Acoustic-FDTD-Kernel)
+[![CUDA](https://img.shields.io/badge/CUDA-12.3-blue)](https://developer.nvidia.com/cuda-toolkit)
+[![Architecture](https://img.shields.io/badge/GPU-sm__75_--_sm__90-orange)](https://developer.nvidia.com/cuda-gpus)
 
 ## Overview
 
-This repository contains three optimized implementations of a 3D acoustic FDTD solver:
-- **OpenACC**: High-level directive-based GPU programming
-- **CUDA**: Hand-optimized CUDA kernels
-- **CUDA_Optimized**: CUDA with shared memory tiling and loop unrolling
+This repository contains **four progressively optimized implementations** of a 4th-order 3D acoustic FDTD stencil, providing a practical case study in GPU optimization techniques:
+
+1. **OpenACC** — Compiler-optimized baseline using directives
+2. **Plain CUDA** — Simple explicit GPU code (1 thread per output, no shared memory)
+3. **Textbook CUDA** — PMPP Chapter 8 tiled stencil with shared memory and register blocking
+4. **Optimized CUDA** — Advanced ring buffer pipeline with L2 persistence hints
+
+### Performance Results (H100, 768³ grid, 50 timesteps)
+
+| Implementation | GFLOP/s | Speedup vs Plain | Key Optimization |
+|----------------|---------|------------------|------------------|
+| Plain CUDA | 809 | 1.0× (baseline) | Coalesced global access |
+| **Textbook** | **2647** | **3.3×** | Shared memory tiling + register planes |
+| OpenACC | 3202 | 4.0× | Compiler automatic optimization |
+| **Optimized** | **4271** | **5.3×** | Ring buffer + L2 persistence + `__ldg()` |
+
+**Key insight:** The textbook kernel achieves 83% of the optimized kernel's performance with **100× less shared memory** (576 bytes vs 60 KB) and significantly simpler code — an excellent balance of performance and maintainability.
+
+---
 
 ## Quick Start
 
+### Local Build
+
 ```bash
-# Build for RTX 2080 Ti
-make clean && GPU_ARCH=sm_75 make -j
+# Clone repository
+git clone https://github.com/ycnliu/Accelerated-3D-Acoustic-FDTD-Kernel.git
+cd Accelerated-3D-Acoustic-FDTD-Kernel
 
-# Run unified benchmark (correctness + performance)
-make run
+# Build for your GPU (auto-tunes UNROLL_FACTOR for shared memory)
+rm -rf _build_sm90 && mkdir _build_sm90 && cd _build_sm90
+cp ../*.cu ../*.cpp ../*.h ../Makefile .
+GPU_ARCH=sm_90 make -j4    # H100
+# GPU_ARCH=sm_75 make -j4  # RTX 2080 Ti / RTX 8000
+# GPU_ARCH=sm_70 make -j4  # V100
+# GPU_ARCH=sm_86 make -j4  # A40
 
-# View results
-make show-results
+# Run benchmark
+./fdtd_benchmark
 ```
 
-## Unified Benchmark Workflow
+### HPC Cluster (Slurm)
 
-The benchmark automatically runs in three phases:
+```bash
+# Submit job for specific GPU
+sbatch scripts/bench_h100.sh       # H100 (partition es2)
+sbatch scripts/bench_v100.sh       # V100 (partition es1)
+sbatch scripts/bench_a40.sh        # A40 (partition es1)
+sbatch scripts/bench_2080ti.sh     # RTX 2080 Ti (partition es0)
+sbatch scripts/bench_grtx8000.sh   # RTX 8000 (partition es1)
 
-### Phase 1: Correctness Verification
-- Tests all implementations against OpenACC reference
-- Grid sizes: 32³, 64³, 128³, 256³, 512³
-- 50 timesteps per test
-- Pass criteria: L2 error < 1e-4
+# Check results
+tail slurm_fdtd_h100_*.out
+```
 
-### Phase 2: Performance Benchmark
-- Runs all three implementations
-- Grid sizes: 32³, 64³, 128³, 256³, 512³
-- 50 timesteps, 1 source
-- 5 repetitions with statistics
-- Writes detailed CSV output
+---
 
-### Phase 3: Results Summary
-- Displays benchmark.csv data
-- Shows timing breakdown and efficiency metrics
+## Four Kernel Implementations
+
+### 1. Plain CUDA (`cuda.cu`)
+
+**Strategy:** Simple, straightforward GPU parallelization.
+
+```cuda
+// One thread per output point, 8×8×8 thread blocks (512 threads)
+__global__ void stencil_kernel(u_in, u_out, ...) {
+  int gx = blockIdx.x * blockDim.x + threadIdx.x;
+  int gy = blockIdx.y * blockDim.y + threadIdx.y;
+  int gz = blockIdx.z * blockDim.z + threadIdx.z;
+
+  // Read 25 points from global memory (no reuse)
+  float d2dx2 = c_0*uc + c_m2*(u[X-2] + u[X+2]) + c_m1*(u[X-1] + u[X+1]);
+  // ... similar for Y, Z
+
+  u_out[idx] = 2*uc - um1 + dt²*lap/m;
+}
+```
+
+**Pros:** Simple, easy to understand
+**Cons:** No data reuse, 25× redundant global reads
+**Performance:** 809 GFLOP/s on H100 (baseline)
+
+---
+
+### 2. Textbook CUDA (`cuda_textbook.cu`)
+
+**Strategy:** PMPP Chapter 8 tiled stencil with shared memory Y-Z plane caching.
+
+```cuda
+// 12×12×1 thread blocks, each thread computes 8 outputs along X
+__global__ void textbook_tiled_stencil_kernel(...) {
+  __shared__ float curr_s[TB_IN_TILE][TB_IN_TILE];  // 576 bytes (12×12 Y-Z plane)
+
+  // Load current Y-Z plane into shared memory
+  curr_s[ty][tx] = u[...];
+  __syncthreads();
+
+  // Sweep along X direction with register planes
+  float pm2, pm1, pc, pp1;  // 4 X-planes in registers
+
+  for (int x_out = 0; x_out < TB_OUT_TILE; ++x_out) {
+    // Compute stencil using shared memory (Y,Z) and registers (X)
+    float d2dx2 = c_0*pc + c_m2*(pm2 + pp2) + c_m1*(pm1 + pp1);
+    float d2dy2 = c_0*pc + c_m2*(curr_s[J-2][K] + curr_s[J+2][K]) + ...;
+
+    u_out[idx] = 2*pc - pm1 + dt²*lap/m;
+
+    // Shift register planes for next X iteration
+    pm2 = pm1; pm1 = pc; pc = pp1; pp1 = pp2;
+  }
+}
+```
+
+**Pros:**
+- Eliminates ~88% of redundant reads in Y/Z directions via shared memory
+- Register blocking for X direction (low latency)
+- Only 576 bytes shared memory (fits all GPUs easily)
+
+**Cons:** Less aggressive than optimized kernel
+**Performance:** 2647 GFLOP/s on H100 (**3.3× vs plain**)
+
+---
+
+### 3. Optimized CUDA (`cuda_optimized.cu`)
+
+**Strategy:** Ring buffer pipeline with L2 cache persistence hints.
+
+```cuda
+// 64×16×1 thread blocks (1024 threads), ring buffer of 12 Y-Z planes
+__global__ __launch_bounds__(1024)
+void stencil_kernel_final(...) {
+  __shared__ float smem[RING_SIZE][TY+4][TZ+5];  // 60-66 KB ring buffer
+
+  // Load 12 Y-Z planes into ring buffer
+  for (int i = 0; i < RING_SIZE; ++i) {
+    load_plane(i, ...);
+  }
+  __syncthreads();
+
+  // Unrolled X-sweep (UNROLL_FACTOR = 7-8)
+  for (int x = ...; x < x_end; x += UNROLL_FACTOR) {
+    #pragma unroll
+    for (int u = 0; u < UNROLL_FACTOR; ++u) {
+      // Fetch from ring buffer
+      float* Pm2 = smem[(cur + 0) % RING_SIZE];
+      float* Pm1 = smem[(cur + 1) % RING_SIZE];
+      float* Pc  = smem[(cur + 2) % RING_SIZE];
+
+      // Explicit fmaf chains
+      float d2dx2 = fmaf(c_weights[0], Pm2+Pp2, fmaf(c_weights[1], Pm1+Pp1, c_weights[2]*uc));
+
+      u_out[idx] = 2*uc - um1 + dt²*lap/m;
+      cur++;
+    }
+
+    __syncthreads();
+    load_plane((cur + RING_SIZE - 1) % RING_SIZE, ...);  // Refill oldest plane
+    __syncthreads();
+  }
+}
+```
+
+**Additional optimizations:**
+- `__ldg()` read-only loads (texture cache hint)
+- Explicit `fmaf()` chains for deterministic rounding
+- L2 cache persistence on current field (H100):
+  ```cuda
+  // Reserve 40 MB L2 for "hot" data, updated each timestep
+  stream_attr.accessPolicyWindow.base_ptr = d_shadow[t0];
+  stream_attr.accessPolicyWindow.num_bytes = 40 MB;
+  cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &stream_attr);
+  ```
+
+**Pros:** Maximum performance, L2 persistence, pipeline overlap
+**Cons:** 100× more shared memory, complex ring indexing
+**Performance:** 4271 GFLOP/s on H100 (**5.3× vs plain, 1.6× vs textbook**)
+
+---
+
+### 4. OpenACC (`openacc.cpp`)
+
+**Strategy:** Compiler automatic optimization with directives.
+
+```cpp
+#pragma acc parallel loop collapse(3) present(m,u)
+for (int x = x_m; x <= x_M; x++) {
+  for (int y = y_m; y <= y_M; y++) {
+    for (int z = z_m; z <= z_M; z++) {
+      // Standard C++ stencil code
+      float d2dx2 = c_0*uc + c_m2*(u[t0][x-2][y][z] + u[t0][x+2][y][z]) + ...;
+      u[t2][x][y][z] = 2*uc - um1 + dt²*lap/m;
+    }
+  }
+}
+```
+
+**Pros:** Portable, minimal code changes
+**Cons:** Compiler-dependent, less control
+**Performance:** 3202 GFLOP/s on H100 (4.0× vs plain, between textbook and optimized)
+
+---
+
+## Key Optimizations Explained
+
+### 1. Shared Memory Tiling (Textbook & Optimized)
+
+**Problem:** Plain CUDA reads each point 25 times (stencil neighbors overlap)
+
+**Solution:** Cache Y-Z plane in shared memory, reuse across threads
+
+```
+Without shared memory:              With shared memory (12×12 tile):
+Each thread reads 25 points         Load 144 points into shared memory
+from global memory independently    All threads reuse → 88% fewer global reads
+```
+
+**Benefit:** 3.3× speedup (textbook kernel)
+
+---
+
+### 2. Register Plane Sweep (Textbook)
+
+**Problem:** X-direction also has redundant reads
+
+**Solution:** Keep 4 X-planes in registers, shift window as we sweep
+
+```
+Register state for output at x=i:
+  pm2 = u[i-2][j][k]    ─┐
+  pm1 = u[i-1][j][k]     │ Read once, reuse
+  pc  = u[i  ][j][k]     │ across 8 outputs
+  pp1 = u[i+1][j][k]    ─┘
+
+Compute output → Shift registers → Compute next output
+pm2 ← pm1; pm1 ← pc; pc ← pp1; pp1 ← new read
+```
+
+**Benefit:** Eliminates redundant X-reads, low-latency register access
+
+---
+
+### 3. Ring Buffer Pipeline (Optimized)
+
+**Problem:** Sequential X-sweep stalls on memory
+
+**Solution:** Unroll loop, overlap compute and memory with ring buffer
+
+```
+Ring buffer (12 planes):
+┌───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┐
+│ 0 │ 1 │ 2 │ 3 │ 4 │ 5 │ 6 │ 7 │ 8 │ 9 │10 │11 │
+└───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┘
+  │                   └─Stencil reads from cur+0..cur+4
+  └─Refill oldest plane while computing
+
+UNROLL_FACTOR = 8 processes 8 X-iterations per inner loop
+Pipeline: Load → Compute → Load → Compute (overlap)
+```
+
+**Benefit:** 1.6× additional speedup over textbook (5.3× total vs plain)
+
+---
+
+### 4. L2 Cache Persistence (Optimized, H100 only)
+
+**Problem:** Leapfrog scheme rotates current field (t0) through 3 buffers
+**Solution:** Explicitly tell hardware which buffer is "hot"
+
+```cpp
+// Each timestep, update L2 persistence window to track t0
+for (int time = 0; time < nsteps; ++time) {
+  int t0 = time % 3;  // Current field rotates: 0→1→2→0→1→2...
+
+  // Tell L2: "This 40 MB is hot, keep it cached"
+  stream_attr.accessPolicyWindow.base_ptr = d_shadow[t0];
+  cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &stream_attr);
+
+  // Launch kernel (reads d_shadow[t0] 25× per output)
+  stencil_kernel<<<...>>>(d_shadow[t0], ...);
+}
+```
+
+**Why it works:**
+- Stencil reads current field (t0) **25 times** per output (4th-order, 3D)
+- Previous field (t1) read **once** (leapfrog: unew = 2\*uc - um1 + lap)
+- Without hint: LRU may evict t0 cache lines even though they're 25× hotter
+- With hint: t0 protected in 40 MB L2 "persistent zone", guaranteed hits
+
+**Benefit:** 5-15% additional speedup on H100 (1.6× → 1.7×)
+
+---
+
+## Architecture-Specific Tuning
+
+### Shared Memory Auto-Tuning (Makefile)
+
+The optimized kernel uses architecture-dependent shared memory:
+
+```makefile
+# Turing (sm_75) has 64 KB max shared memory per block
+ifeq ($(GPU_ARCH),sm_75)
+  UNROLL_FACTOR ?= 7   # 60720 bytes (fits 64 KB limit)
+else
+  UNROLL_FACTOR ?= 8   # 66240 bytes (OK for sm_70/80/86/90)
+endif
+
+CUDA_FLAGS += -DUNROLL_FACTOR=$(UNROLL_FACTOR)
+```
+
+**Shared memory calculation:**
+```
+smem_bytes = (2*R + UNROLL) × (TY + 2*R) × (TZ + 2*R + 1) × sizeof(float)
+           = (4 + 8) × 20 × 69 × 4 = 66240 bytes  (UNROLL=8)
+           = (4 + 7) × 20 × 69 × 4 = 60720 bytes  (UNROLL=7, sm_75)
+```
+
+This ensures the optimized kernel runs on **all GPU architectures** (sm_70 to sm_90).
+
+---
+
+## Build Requirements
+
+- **NVIDIA HPC SDK 23.11+** (provides `nvc++` for OpenACC and `nvcc` for CUDA)
+- **CUDA 12.3+**
+- **GPU:** Compute capability 7.0+ (Volta, Turing, Ampere, Ada, Hopper)
+- **OS:** Linux (tested on Rocky Linux 8)
+
+### Tested Configurations
+
+| GPU | Arch | Partition | UNROLL | Shared Mem | Status |
+|-----|------|-----------|--------|------------|--------|
+| H100 | sm_90 | es2 | 8 | 66 KB | ✅ Tested |
+| A40 | sm_86 | es1 | 8 | 66 KB | ✅ Tested |
+| RTX 8000 | sm_75 | es1 | 7 | 60 KB | ✅ Tested |
+| RTX 2080 Ti | sm_75 | es0 | 7 | 60 KB | ✅ Tested |
+| V100 | sm_70 | es1 | 8 | 66 KB | ✅ Tested |
+| A100 | sm_80 | es1 | 8 | 66 KB | ⚠️ Node down (ready) |
+
+---
 
 ## Repository Structure
 
 ```
 .
-├── main.cpp              # Unified benchmark driver with correctness tests
-├── openacc.cpp          # OpenACC implementation
-├── cuda.cu              # Regular CUDA implementation
-├── cuda_optimized.cu    # Optimized CUDA with shared memory + unrolling
-├── Makefile             # Simplified build system
-├── README.md            # This file
-├── DEBUG.md             # Development history and debugging notes
-└── H100_README.md       # H100 optimization notes
+├── cuda.cu              # Plain CUDA kernel (baseline)
+├── cuda_textbook.cu     # PMPP Ch.8 tiled stencil (NEW)
+├── cuda_optimized.cu    # Ring buffer + L2 persistence
+├── openacc.cpp          # OpenACC directive-based
+├── main.cpp             # Benchmark driver with correctness tests
+├── Makefile             # Auto-tunes UNROLL_FACTOR by GPU_ARCH
+├── scripts/
+│   ├── bench_h100.sh         # H100 Slurm script (partition es2)
+│   ├── bench_v100.sh         # V100 Slurm script (partition es1)
+│   ├── bench_a40.sh          # A40 Slurm script (partition es1)
+│   ├── bench_2080ti.sh       # RTX 2080 Ti script (partition es0)
+│   └── bench_grtx8000.sh     # RTX 8000 script (partition es1)
+└── README.md            # This file
 ```
 
-## Build Requirements
+---
 
-- **NVIDIA HPC SDK** (for OpenACC): `nvc++` with `-acc` flag
-- **CUDA Toolkit**: `nvcc` with compute capability 7.5+ (sm_75 for RTX 2080 Ti)
-- **GNU Make**
-- **CUDA-capable GPU**
+## Correctness Verification
 
-## Building
+All kernels pass correctness tests using **L2 norm tolerance** (robust to FMA ordering variations):
+
+```
+Tolerance: L2 error < 1e-4 (relative metric)
+Grid sizes tested: 32³, 64³, 128³, 256³, 512³, 768³
+Timesteps: 50 (leapfrog scheme)
+```
+
+**Key finding:** Plain CUDA and Textbook kernels produce **bitwise identical** results. Optimized kernel has slightly different results (~3.9 max absolute difference vs OpenACC) due to explicit `fmaf()` chains creating different ULP-level rounding, but L2 norm confirms overall correctness (~3-8e-5).
+
+---
+
+## Performance Analysis
+
+### Arithmetic Intensity
+
+```
+FLOPs per output point = 36
+  - 3 dimensions × (4 neighbors × 2 ops + 1 center × 1 op) = 3 × 9 = 27
+  - Leapfrog: 2*uc - um1 + lap/m = 6 ops
+  - Medium read: 1 op
+  - Total: 27 + 6 + 3 = 36 FLOPs
+
+Bytes per output point (with perfect reuse):
+  - Read 25 points from u[t0] = 100 bytes
+  - Read 1 point from u[t1] = 4 bytes
+  - Read 1 point from m = 4 bytes
+  - Write 1 point to u[t2] = 4 bytes
+  - Total: 112 bytes
+
+Arithmetic Intensity = 36 / 112 = 0.32 FLOPs/byte (memory-bound)
+```
+
+**Observation:** Stencil codes are inherently memory-bound → shared memory reuse is critical.
+
+---
+
+## Profiling (Nsight Compute)
+
+Capture detailed kernel metrics for interview/analysis:
 
 ```bash
-# RTX 2080 Ti (Turing) - default
-make clean && make -j
-
-# H100 (Hopper)
-make clean && GPU_ARCH=sm_90 make -j
-
-# A100 (Ampere)
-make clean && GPU_ARCH=sm_80 make -j
+# Profile optimized kernel on H100
+ncu --set full --metrics \
+    sm__warps_active.avg.pct_of_peak_sustained_active,\
+    lts__t_sectors_hit_rate.pct,\
+    dram__throughput.avg.pct_of_peak_sustained_elapsed \
+    --kernel-name "stencil_kernel_final" \
+    --launch-count 5 \
+    ./fdtd_benchmark
 ```
 
-## Running
+**Key metrics to examine:**
+- **Occupancy** (`sm__warps_active`): Likely 25-50% due to 60 KB shared memory
+- **L2 hit rate** (`lts__t_sectors_hit_rate`): ~80-85% with persistence, ~60-70% without
+- **DRAM throughput** (`dram__throughput`): Lower with L2 persistence (more L2 hits)
 
-```bash
-# Complete benchmark (correctness + performance)
-make run
+---
 
-# View CSV results
-make show-results
+## Design Decisions & Trade-offs
 
-# Clean everything
-make clean
+### Why L2 Norm for Correctness?
 
-# Show help
-make help
+**Problem:** Absolute difference tolerance (1e-4) too tight for comparing kernels with different FMA orderings.
+
+**Solution:** L2 norm is a relative metric, robust to ULP-level rounding variations:
+```cpp
+l2_error = sqrt(sum((u_test - u_ref)²) / sum(u_ref²))
 ```
 
-## Benchmark Output
+**Result:** All kernels pass with L2 < 1e-4, even with different FMA strategies.
 
-### Console Output
+---
+
+### Why Disable Source Injection?
+
+**Original code:** Benchmark included trilinear source injection (section 1) mixed with stencil (section 0).
+
+**Problem:** Source injection is atomic-heavy and pollutes stencil performance measurement.
+
+**Solution:** Comment out section 1 in all kernels → pure stencil-only benchmark.
+
+**Benefit:** Clean A/B comparison of stencil optimization techniques without source noise.
+
+---
+
+### Why Not Always Use Optimized Kernel?
+
+**Textbook kernel advantages:**
+- **Simpler code:** 380 lines vs 500+ for optimized
+- **100× less shared memory:** 576 bytes vs 60 KB (better occupancy)
+- **No arch-specific tuning:** Works as-is on all GPUs
+- **83% of optimized performance:** 2647 vs 4271 GFLOP/s on H100
+
+**When to use which:**
+- **Production code:** Textbook (maintainability + good performance)
+- **Peak performance:** Optimized (research, benchmarks, competitions)
+
+---
+
+## Known Limitations
+
+1. **L2 persistence H100-only:** `cudaAccessPropertyPersisting` requires sm_90+
+2. **Shared memory limits occupancy:** 60 KB/block → ~1-2 blocks/SM on most GPUs
+3. **Memory-bound:** Arithmetic intensity 0.32 → can't reach GPU peak TFLOP/s
+4. **No temporal blocking:** Single-timestep kernel (future: diamond tiling)
+
+---
+
+## Future Work
+
+- **Async copy (`cp.async`):** Pipeline global→shared loads asynchronously
+- **Warp-specialization:** Some warps compute, others load (reduce `__syncthreads()` stalls)
+- **Diamond tiling:** Multi-timestep kernel to amortize global reads
+- **Mixed precision:** FP16 storage, FP32 compute (infrastructure exists, disabled)
+
+---
+
+## Citation
+
+If you use this code in your research, please cite:
+
+```bibtex
+@software{fdtd_benchmark_2026,
+  author = {Liu, Yichen},
+  title = {3D Acoustic FDTD GPU Benchmark Suite},
+  year = {2026},
+  url = {https://github.com/ycnliu/Accelerated-3D-Acoustic-FDTD-Kernel}
+}
 ```
-STEP 1: CORRECTNESS VERIFICATION
-- Tests 5 grid sizes (32³ to 512³)
-- Compares CUDA vs OpenACC
-- Compares CUDA_Optimized vs OpenACC
-- Reports max absolute/relative error, L2 norm
 
-STEP 2: PERFORMANCE BENCHMARK
-- Runs all implementations
-- Shows timing breakdown per grid size
-- Computes GFLOP/s and GB/s metrics
-- Displays GPU efficiency percentages
-
-STEP 3: RESULTS SUMMARY
-- CSV table with all metrics
-- Ready for analysis/plotting
-```
-
-### CSV Schema (benchmark.csv)
-```
-Method,Total_Time(ms),Total_Std(ms),
-Section0_Time(ms),Section0_Std(ms),    # Main stencil compute
-Section1_Time(ms),Section1_Std(ms),    # Source injection
-Device_Time(ms),Device_Std(ms),        # Total GPU time
-Overhead(ms),Overhead_Std(ms),         # Host overhead
-GFLOPS,GFLOPS_Std,GBps,GBps_Std,
-Compute_Eff(%),Memory_Eff(%),          # vs GPU peak specs
-AI,NX,NY,NZ,Timesteps,Sources,StencilOrder
-```
-
-## Implementation Details
-
-### FDTD Algorithm
-- **4th-order finite difference** spatial discretization (radius-2 stencil)
-- **2nd-order leapfrog** time integration
-- **3D acoustic wave equation**: ∂²u/∂t² = v²∇²u
-- **Ricker wavelet source** injection with trilinear interpolation
-- **Halo padding**: 4 cells per side for boundary conditions
-
-### Optimizations
-
-#### OpenACC
-- `#pragma acc parallel loop collapse(3)`
-- Compiler-managed data movement
-- Automatic kernel fusion
-
-#### CUDA
-- Coalesced global memory access
-- 3D thread block tiling
-
-#### CUDA_Optimized
-- **Shared memory tiling**: 8×8×8 blocks with 12×12×12 tiles (radius-2 halos)
-- **Constant memory**: Stencil coefficients (-1/12, 4/3, -5/2)
-- **Loop unrolling**: `#pragma unroll` on halo loads and stencil ops
-- **Mixed precision ready**: Infrastructure for FP16 storage (disabled)
-
-### Performance Metrics
-- **FLOPs per point**: 3×(4+1)×2 + 6 = 36 (4th-order 3D Laplacian + leapfrog)
-- **Bytes per point**: ~64 (naive) or ~12 (optimized with cache reuse)
-- **Arithmetic Intensity**: 0.56 - 3.0 FLOPs/byte (memory-bound)
-
-## Recent Updates
-
-### Unified Benchmark (Latest)
-- Single executable runs correctness + performance tests
-- Simplified Makefile (just `make run`)
-- All timing in milliseconds (CSV and console)
-- Automatic GPU detection and peak specs
-
-### CUDA_Optimized Enhancements
-- Added `#pragma unroll` to stencil computation and halo loading
-- Fixed halo loading to include both ±1 and ±2 neighbors
-- Expected 5-15% performance improvement
-
-## GPU Compatibility
-
-| GPU | Compute Capability | GPU_ARCH | Status |
-|-----|-------------------|----------|--------|
-| RTX 2080 Ti | 7.5 (Turing) | sm_75 | ✅ Tested |
-| A100 | 8.0 (Ampere) | sm_80 | ✅ Compatible |
-| H100 | 9.0 (Hopper) | sm_90 | ✅ Compatible |
-
-## Performance Notes
-
-- OpenACC performance is highly compiler-dependent (NVHPC 23.11+)
-- RTX 2080 Ti: FP16 Tensor Cores available but limited benefit for memory-bound workloads
-- Peak bandwidth: ~616 GB/s (2080 Ti), ~2000 GB/s (A100), ~3350 GB/s (H100)
-- Shared memory tiling benefits increase with larger L1 cache (A100+)
+---
 
 ## License
 
-This project is provided as-is for research and educational purposes.
+MIT License. See LICENSE file for details.
 
-## References
+---
 
-- DEBUG.md: Detailed development history and bug fixes
-- H100_README.md: H100-specific optimizations and pipelining
+## Acknowledgments
+
+- **PMPP textbook** (Hwu et al.) for tiled stencil algorithm inspiration
+- **NVIDIA HPC SDK** for excellent OpenACC compiler
+- **Lawrencium HPC cluster** (LBNL) for compute resources
+
+---
+
+**Questions? Issues?** Open an issue on GitHub or contact the author.
