@@ -13,6 +13,15 @@ GPU_ARCH      ?= sm_75
 CUDA_ARCH_SM   = $(GPU_ARCH)
 NVHPC_CC       = $(subst sm_,cc,$(GPU_ARCH))
 
+# ---------------- Arch-dependent tuning ----------------
+# sm_75 (Turing: 2080Ti, RTX8000) has 64KB max shared memory per block.
+# UNROLL_FACTOR=8 needs 66240 bytes, so cap at 7 (60720 bytes) for sm_75.
+ifeq ($(GPU_ARCH),sm_75)
+  UNROLL_FACTOR ?= 7
+else
+  UNROLL_FACTOR ?= 8
+endif
+
 # ---------------- Flags ----------------
 # NVHPC compile flags (host/OpenACC/CUDA-interoperable objs)
 NVHPC_FLAGS      = -acc -O3 -std=c++17 -I. -gpu=$(NVHPC_CC)
@@ -21,7 +30,8 @@ NVHPC_LINK_FLAGS = -cuda -cudalib=cublas,curand
 
 # NVCC compile flags for .cu -> .o
 CUDA_FLAGS  = -O3 --std=c++17 -arch=$(CUDA_ARCH_SM) -lineinfo \
-              -Xptxas=-O3,-dlcm=ca -use_fast_math --extended-lambda
+              -Xptxas=-O3,-dlcm=ca -use_fast_math --extended-lambda \
+              -DUNROLL_FACTOR=$(UNROLL_FACTOR)
 
 # ---------------- Files ----------------
 TARGET        = fdtd_benchmark
@@ -31,10 +41,11 @@ TEST_SRC      = test_correctness.cpp
 OPENACC_SRC   = openacc.cpp
 CUDA_SRC      = cuda.cu
 CUDA_OPT_SRC  = cuda_optimized.cu
+CUDA_TB_SRC   = cuda_textbook.cu
 
 # Object list (do not remove any objects)
-OBJS := $(MAIN_SRC:.cpp=.o) $(OPENACC_SRC:.cpp=.o) $(CUDA_SRC:.cu=.o) $(CUDA_OPT_SRC:.cu=.o)
-KERNEL_OBJS := $(OPENACC_SRC:.cpp=.o) $(CUDA_SRC:.cu=.o) $(CUDA_OPT_SRC:.cu=.o)
+OBJS := $(MAIN_SRC:.cpp=.o) $(OPENACC_SRC:.cpp=.o) $(CUDA_SRC:.cu=.o) $(CUDA_OPT_SRC:.cu=.o) $(CUDA_TB_SRC:.cu=.o)
+KERNEL_OBJS := $(OPENACC_SRC:.cpp=.o) $(CUDA_SRC:.cu=.o) $(CUDA_OPT_SRC:.cu=.o) $(CUDA_TB_SRC:.cu=.o)
 
 # ---------------- Default Target ----------------
 all: $(TARGET)

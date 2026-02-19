@@ -413,12 +413,13 @@ extern "C" int Kernel_CUDA_Optimized(
 #endif
         x_m,x_M,y_m,y_M,z_m,z_M, t0,t1,t2, dt,r2,r3,r4, has_src ? 1 : 0);
 
-    if (has_src) {
-      source_inject_kernel<<<divUp(p_src_M-p_src_m+1,128),128>>>(
-          d_m,d_src,d_crd,u_t2_output, nxp,nyp,nzp, x_m,x_M,y_m,y_M,z_m,z_M,
-          h_x,h_y,h_z, o_x,o_y,o_z, p_src_m,p_src_M, time,
-          src_vec->size[1], src_coords_vec->size[1]);
-    }
+    // SECTION 1 DISABLED: Source injection commented out for pure stencil benchmark
+    // if (has_src) {
+    //   source_inject_kernel<<<divUp(p_src_M-p_src_m+1,128),128>>>(
+    //       d_m,d_src,d_crd,u_t2_output, nxp,nyp,nzp, x_m,x_M,y_m,y_M,z_m,z_M,
+    //       h_x,h_y,h_z, o_x,o_y,o_z, p_src_m,p_src_M, time,
+    //       src_vec->size[1], src_coords_vec->size[1]);
+    // }
 
 #if USE_FP32_ONLY
     cudaMemcpy(d_u_f32 + t2*nPerLevel, u_t2_output, nPerLevel*sizeof(float), cudaMemcpyDeviceToDevice);
@@ -448,12 +449,13 @@ extern "C" int Kernel_CUDA_Optimized(
 #endif
         x_m,x_M,y_m,y_M,z_m,z_M, t0,t1,t2, dt,r2,r3,r4, has_src ? 1 : 0);
 
-    if (has_src) {
-      source_inject_kernel<<<divUp(p_src_M-p_src_m+1,128),128>>>(
-          d_m,d_src,d_crd,u_t2_output, nxp,nyp,nzp, x_m,x_M,y_m,y_M,z_m,z_M,
-          h_x,h_y,h_z, o_x,o_y,o_z, p_src_m,p_src_M, time,
-          src_vec->size[1], src_coords_vec->size[1]);
-    }
+    // SECTION 1 DISABLED: Source injection commented out for pure stencil benchmark
+    // if (has_src) {
+    //   source_inject_kernel<<<divUp(p_src_M-p_src_m+1,128),128>>>(
+    //       d_m,d_src,d_crd,u_t2_output, nxp,nyp,nzp, x_m,x_M,y_m,y_M,z_m,z_M,
+    //       h_x,h_y,h_z, o_x,o_y,o_z, p_src_m,p_src_M, time,
+    //       src_vec->size[1], src_coords_vec->size[1]);
+    // }
 
     // NO per-timestep copy/convert - stay entirely in FP32 shadow buffers
     // Ring indexing handles time level swapping automatically
@@ -466,8 +468,9 @@ extern "C" int Kernel_CUDA_Optimized(
   // Measure total time (detailed per-kernel profiling via nsys if needed)
   float totalMs = 0.0f;
   cudaEventElapsedTime(&totalMs, eStart, eEnd);
-  timers->section0 = (totalMs * 1e-3f) * (has_src ? 0.85f : 1.0f);
-  timers->section1 = (totalMs * 1e-3f) * (has_src ? 0.15f : 0.0f);
+  // SECTION 1 DISABLED: Report all time as section0 (stencil only)
+  timers->section0 = totalMs * 1e-3f;
+  timers->section1 = 0.0;
 
   // After time loop: commit final shadow buffers back to main array (ONCE)
   const int final_t0 = time_M % 3;

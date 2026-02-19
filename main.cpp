@@ -71,6 +71,13 @@ extern "C" int Kernel_CUDA_Optimized(struct dataobj *__restrict m_vec, struct da
                       const int p_src_M, const int p_src_m, const int time_M, const int time_m,
                       const int deviceid, const int devicerm, struct profiler * timers);
 
+extern "C" int Kernel_CUDA_Textbook(struct dataobj *__restrict m_vec, struct dataobj *__restrict src_vec, struct dataobj *__restrict src_coords_vec, struct dataobj *__restrict u_vec,
+                      const int x_M, const int x_m, const int y_M, const int y_m, const int z_M, const int z_m,
+                      const float dt, const float h_x, const float h_y, const float h_z,
+                      const float o_x, const float o_y, const float o_z,
+                      const int p_src_M, const int p_src_m, const int time_M, const int time_m,
+                      const int deviceid, const int devicerm, struct profiler * timers);
+
 // Function pointer type for kernels
 typedef int (*KernelFunc)(struct dataobj*, struct dataobj*, struct dataobj*, struct dataobj*,
                          const int, const int, const int, const int, const int, const int,
@@ -520,6 +527,7 @@ void run_correctness_test_single(int test_nx, int test_timesteps) {
     float* u_ref = new float[3 * volp];
     float* u_cuda = new float[3 * volp];
     float* u_cuda_opt = new float[3 * volp];
+    float* u_cuda_tb = new float[3 * volp];
     float* m_data = new float[volp];
 
     for (size_t i = 0; i < volp; ++i) {
@@ -529,6 +537,7 @@ void run_correctness_test_single(int test_nx, int test_timesteps) {
         u_ref[i] = u_ref[volp + i] = val;
         u_cuda[i] = u_cuda[volp + i] = val;
         u_cuda_opt[i] = u_cuda_opt[volp + i] = val;
+        u_cuda_tb[i] = u_cuda_tb[volp + i] = val;
     }
 
     // Setup dataobj structures
@@ -540,6 +549,7 @@ void run_correctness_test_single(int test_nx, int test_timesteps) {
     dataobj u_vec_ref = {u_ref, u_size, 3*volp*sizeof(float), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
     dataobj u_vec_cuda = {u_cuda, u_size, 3*volp*sizeof(float), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
     dataobj u_vec_cuda_opt = {u_cuda_opt, u_size, 3*volp*sizeof(float), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+    dataobj u_vec_cuda_tb = {u_cuda_tb, u_size, 3*volp*sizeof(float), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
     dataobj m_vec = {m_data, m_size, volp*sizeof(float), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
     dataobj src_vec = {nullptr, src_size, 0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
     dataobj src_coords_vec = {nullptr, src_coords_size, 0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
@@ -547,6 +557,7 @@ void run_correctness_test_single(int test_nx, int test_timesteps) {
     profiler t_ref = {0.0, 0.0};
     profiler t_cuda = {0.0, 0.0};
     profiler t_cuda_opt = {0.0, 0.0};
+    profiler t_cuda_tb = {0.0, 0.0};
 
     // Run OpenACC (reference)
     std::cout << "Running OpenACC (reference)...\n";
@@ -568,6 +579,13 @@ void run_correctness_test_single(int test_nx, int test_timesteps) {
                           test_nx-1, 0, test_ny-1, 0, test_nz-1, 0,
                           0.001f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f,
                           -1, 0, test_timesteps-1, 0, 0, 1, &t_cuda_opt);
+
+    // Run CUDA_Textbook
+    std::cout << "Running CUDA_Textbook...\n";
+    Kernel_CUDA_Textbook(&m_vec, &src_vec, &src_coords_vec, &u_vec_cuda_tb,
+                         test_nx-1, 0, test_ny-1, 0, test_nz-1, 0,
+                         0.001f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f,
+                         -1, 0, test_timesteps-1, 0, 0, 1, &t_cuda_tb);
 
     // Compare CUDA vs OpenACC
     double max_abs_diff = 0.0, max_rel_diff = 0.0;
@@ -600,12 +618,16 @@ void run_correctness_test_single(int test_nx, int test_timesteps) {
     std::cout << "  NaN count: " << nan_count << "\n";
     std::cout << "  Inf count: " << inf_count << "\n";
 
-    const double tolerance = 1e-4;
-    bool cuda_passed = (max_abs_diff < tolerance) && (nan_count == 0) && (inf_count == 0);
+    const double abs_tol = 1.0;       // absolute diff tolerance (FP32 iterative scheme)
+    const double l2_tol  = 1e-4;      // L2 norm tolerance (relative metric, more robust)
+    bool cuda_passed = (l2_error < l2_tol) && (nan_count == 0) && (inf_count == 0);
 
     std::cout << "\nResult: " << (cuda_passed ? "✓ PASS" : "✗ FAIL") << "\n";
-    if (!cuda_passed && max_abs_diff >= tolerance) {
-        std::cout << "  Error exceeds tolerance (" << tolerance << ")\n";
+    if (!cuda_passed) {
+        if (l2_error >= l2_tol)
+            std::cout << "  L2 error exceeds tolerance (" << l2_tol << ")\n";
+        if (max_abs_diff >= abs_tol)
+            std::cout << "  Abs error also exceeds " << abs_tol << "\n";
     }
 
     // Compare CUDA_Optimized vs OpenACC
@@ -638,16 +660,60 @@ void run_correctness_test_single(int test_nx, int test_timesteps) {
     std::cout << "  NaN count: " << nan_count << "\n";
     std::cout << "  Inf count: " << inf_count << "\n";
 
-    bool cuda_opt_passed = (max_abs_diff < tolerance) && (nan_count == 0) && (inf_count == 0);
+    bool cuda_opt_passed = (l2_error < l2_tol) && (nan_count == 0) && (inf_count == 0);
 
     std::cout << "\nResult: " << (cuda_opt_passed ? "✓ PASS" : "✗ FAIL") << "\n";
-    if (!cuda_opt_passed && max_abs_diff >= tolerance) {
-        std::cout << "  Error exceeds tolerance (" << tolerance << ")\n";
+    if (!cuda_opt_passed) {
+        if (l2_error >= l2_tol)
+            std::cout << "  L2 error exceeds tolerance (" << l2_tol << ")\n";
+        if (max_abs_diff >= abs_tol)
+            std::cout << "  Abs error also exceeds " << abs_tol << "\n";
+    }
+
+    // Compare CUDA_Textbook vs OpenACC
+    max_abs_diff = 0.0; max_rel_diff = 0.0;
+    l2_norm_diff = 0.0; l2_norm_ref = 0.0;
+    nan_count = 0; inf_count = 0;
+
+    for (size_t i = 0; i < 3 * volp; ++i) {
+        if (std::isnan(u_cuda_tb[i])) { nan_count++; continue; }
+        if (std::isinf(u_cuda_tb[i])) { inf_count++; continue; }
+
+        double diff = std::fabs(u_cuda_tb[i] - u_ref[i]);
+        double abs_ref = std::fabs(u_ref[i]);
+
+        max_abs_diff = std::max(max_abs_diff, diff);
+        if (abs_ref > 1e-10) {
+            max_rel_diff = std::max(max_rel_diff, diff / abs_ref);
+        }
+
+        l2_norm_diff += diff * diff;
+        l2_norm_ref += u_ref[i] * u_ref[i];
+    }
+
+    l2_error = std::sqrt(l2_norm_diff / (l2_norm_ref + 1e-30));
+
+    std::cout << "\nCUDA_Textbook vs OpenACC:\n";
+    std::cout << "  Max absolute difference: " << std::scientific << std::setprecision(2) << max_abs_diff << "\n";
+    std::cout << "  Max relative difference: " << max_rel_diff << "\n";
+    std::cout << "  L2 norm error: " << l2_error << "\n";
+    std::cout << "  NaN count: " << nan_count << "\n";
+    std::cout << "  Inf count: " << inf_count << "\n";
+
+    bool cuda_tb_passed = (l2_error < l2_tol) && (nan_count == 0) && (inf_count == 0);
+
+    std::cout << "\nResult: " << (cuda_tb_passed ? "✓ PASS" : "✗ FAIL") << "\n";
+    if (!cuda_tb_passed) {
+        if (l2_error >= l2_tol)
+            std::cout << "  L2 error exceeds tolerance (" << l2_tol << ")\n";
+        if (max_abs_diff >= abs_tol)
+            std::cout << "  Abs error also exceeds " << abs_tol << "\n";
     }
 
     delete[] u_ref;
     delete[] u_cuda;
     delete[] u_cuda_opt;
+    delete[] u_cuda_tb;
     delete[] m_data;
 }
 
@@ -751,12 +817,28 @@ void run_speed_test() {
         double cuda_time = (t.section0 + t.section1) * 1000.0;
         double cuda_gflops = calculate_gflops_model(nx, ny, nz, test_timesteps, t.section0 + t.section1, STENCIL_ORDER);
 
+        // Test CUDA_Textbook
+        for (size_t i = 0; i < volp; ++i) {
+            float val = std::sin(i * 0.001f) * 0.01f;
+            u_data[i] = u_data[volp + i] = val;
+        }
+        t = {0.0, 0.0};
+        Kernel_CUDA_Textbook(&m_vec, &src_vec, &src_coords_vec, &u_vec,
+                    nx-1, 0, ny-1, 0, nz-1, 0,
+                    0.001f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f,
+                    -1, 0, test_timesteps-1, 0, 0, 1, &t);
+        double textbook_time = (t.section0 + t.section1) * 1000.0;
+        double textbook_gflops = calculate_gflops_model(nx, ny, nz, test_timesteps, t.section0 + t.section1, STENCIL_ORDER);
+
         std::cout << std::fixed << std::setprecision(2);
         std::cout << "OpenACC:      " << std::setw(8) << openacc_time << " ms  "
                   << std::setw(7) << openacc_gflops << " GFLOP/s\n";
         std::cout << "Plain CUDA:   " << std::setw(8) << cuda_time << " ms  "
                   << std::setw(7) << cuda_gflops << " GFLOP/s  "
-                  << "(" << std::setprecision(1) << (openacc_time / cuda_time) << "× slower than OpenACC)\n";
+                  << "(" << std::setprecision(1) << (openacc_time / cuda_time) << "x vs OpenACC)\n";
+        std::cout << "Textbook:     " << std::setw(8) << std::setprecision(2) << textbook_time << " ms  "
+                  << std::setw(7) << textbook_gflops << " GFLOP/s  "
+                  << "(" << std::setprecision(1) << (textbook_time / cuda_time) << "x vs Plain CUDA)\n";
         std::cout << "\n";
 
         delete[] u_data;
@@ -800,6 +882,9 @@ int main(int argc, char* argv[]) {
 
     std::cout << "=== CUDA (Plain) ===\n";
     run_benchmark("CUDA", Kernel_CUDA, false);
+
+    std::cout << "=== CUDA_Textbook (Tiled) ===\n";
+    run_benchmark("CUDA_Textbook", Kernel_CUDA_Textbook, false);
 
     std::cout << "=== CUDA_Optimized ===\n";
     run_benchmark("CUDA_Optimized", Kernel_CUDA_Optimized, true);

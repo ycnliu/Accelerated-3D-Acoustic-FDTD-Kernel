@@ -22,6 +22,10 @@ main_cuda.cpp
 *.a
 *.so
 *.dylib
+_build_*/
+
+# Slurm output files
+slurm_*.out
 
 # Data files
 *.csv

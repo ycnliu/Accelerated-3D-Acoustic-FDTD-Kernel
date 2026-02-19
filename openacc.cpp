@@ -110,37 +110,38 @@ int Kernel_OpenACC(struct dataobj *__restrict m_vec, struct dataobj *__restrict 
      }
    }
 
-   if (src_vec->size[0]*src_vec->size[1] > 0 && p_src_M - p_src_m + 1 > 0)
-   {
-     #pragma acc parallel loop collapse(4) present(m,src,src_coords,u)
-     for (int p_src = p_src_m; p_src <= p_src_M; p_src += 1)
-     {
-       for (int rsrcx = 0; rsrcx <= 1; rsrcx += 1)
-       {
-         for (int rsrcy = 0; rsrcy <= 1; rsrcy += 1)
-         {
-           for (int rsrcz = 0; rsrcz <= 1; rsrcz += 1)
-           {
-             for (int i = 0; i < NREPEAT; ++i) {
-             int posx = static_cast<int>(std::floor((-o_x + src_coords[p_src][0])/h_x));
-             int posy = static_cast<int>(std::floor((-o_y + src_coords[p_src][1])/h_y));
-             int posz = static_cast<int>(std::floor((-o_z + src_coords[p_src][2])/h_z));
-             //
-             float px = -std::floor((-o_x + src_coords[p_src][0])/h_x) + (-o_x + src_coords[p_src][0])/h_x;
-             float py = -std::floor((-o_y + src_coords[p_src][1])/h_y) + (-o_y + src_coords[p_src][1])/h_y;
-             float pz = -std::floor((-o_z + src_coords[p_src][2])/h_z) + (-o_z + src_coords[p_src][2])/h_z;
-             if (rsrcx + posx >= x_m - 1 && rsrcy + posy >= y_m - 1 && rsrcz + posz >= z_m - 1 && rsrcx + posx <= x_M + 1 && rsrcy + posy <= y_M + 1 && rsrcz + posz <= z_M + 1)
-             {
-               float r0 = 1.0e-2F*(rsrcx*px + (1 - rsrcx)*(1 - px))*(rsrcy*py + (1 - rsrcy)*(1 - py))*(rsrcz*pz + (1 - rsrcz)*(1 - pz))*src[time][p_src]/m[posx + 4][posy + 4][posz + 4];
-               #pragma acc atomic update
-               u[t2][rsrcx + posx + 4][rsrcy + posy + 4][rsrcz + posz + 4] += r0;
-             }
-             }
-           }
-         }
-       }
-     }
-   }
+   // SECTION 1 DISABLED: Source injection commented out for pure stencil benchmark
+   // if (src_vec->size[0]*src_vec->size[1] > 0 && p_src_M - p_src_m + 1 > 0)
+   // {
+   //   #pragma acc parallel loop collapse(4) present(m,src,src_coords,u)
+   //   for (int p_src = p_src_m; p_src <= p_src_M; p_src += 1)
+   //   {
+   //     for (int rsrcx = 0; rsrcx <= 1; rsrcx += 1)
+   //     {
+   //       for (int rsrcy = 0; rsrcy <= 1; rsrcy += 1)
+   //       {
+   //         for (int rsrcz = 0; rsrcz <= 1; rsrcz += 1)
+   //         {
+   //           for (int i = 0; i < NREPEAT; ++i) {
+   //           int posx = static_cast<int>(std::floor((-o_x + src_coords[p_src][0])/h_x));
+   //           int posy = static_cast<int>(std::floor((-o_y + src_coords[p_src][1])/h_y));
+   //           int posz = static_cast<int>(std::floor((-o_z + src_coords[p_src][2])/h_z));
+   //           //
+   //           float px = -std::floor((-o_x + src_coords[p_src][0])/h_x) + (-o_x + src_coords[p_src][0])/h_x;
+   //           float py = -std::floor((-o_y + src_coords[p_src][1])/h_y) + (-o_y + src_coords[p_src][1])/h_y;
+   //           float pz = -std::floor((-o_z + src_coords[p_src][2])/h_z) + (-o_z + src_coords[p_src][2])/h_z;
+   //           if (rsrcx + posx >= x_m - 1 && rsrcy + posy >= y_m - 1 && rsrcz + posz >= z_m - 1 && rsrcx + posx <= x_M + 1 && rsrcy + posy <= y_M + 1 && rsrcz + posz <= z_M + 1)
+   //           {
+   //             float r0 = 1.0e-2F*(rsrcx*px + (1 - rsrcx)*(1 - px))*(rsrcy*py + (1 - rsrcy)*(1 - py))*(rsrcz*pz + (1 - rsrcz)*(1 - pz))*src[time][p_src]/m[posx + 4][posy + 4][posz + 4];
+   //             #pragma acc atomic update
+   //             u[t2][rsrcx + posx + 4][rsrcy + posy + 4][rsrcz + posz + 4] += r0;
+   //           }
+   //           }
+   //         }
+   //       }
+   //     }
+   //   }
+   // }
  }
  #pragma acc wait
 
@@ -168,40 +169,40 @@ int Kernel_OpenACC(struct dataobj *__restrict m_vec, struct dataobj *__restrict 
    }
    STOP(section0,timers)
 
-
-   START(section1)
-   if (src_vec->size[0]*src_vec->size[1] > 0 && p_src_M - p_src_m + 1 > 0)
-   {
-     #pragma acc parallel loop collapse(4) present(m,src,src_coords,u)
-     for (int p_src = p_src_m; p_src <= p_src_M; p_src += 1)
-     {
-       for (int rsrcx = 0; rsrcx <= 1; rsrcx += 1)
-       {
-         for (int rsrcy = 0; rsrcy <= 1; rsrcy += 1)
-         {
-           for (int rsrcz = 0; rsrcz <= 1; rsrcz += 1)
-           {
-             for (int i = 0; i < NREPEAT; ++i) {
-             int posx = static_cast<int>(std::floor((-o_x + src_coords[p_src][0])/h_x));
-             int posy = static_cast<int>(std::floor((-o_y + src_coords[p_src][1])/h_y));
-             int posz = static_cast<int>(std::floor((-o_z + src_coords[p_src][2])/h_z));
-             //
-             float px = -std::floor((-o_x + src_coords[p_src][0])/h_x) + (-o_x + src_coords[p_src][0])/h_x;
-             float py = -std::floor((-o_y + src_coords[p_src][1])/h_y) + (-o_y + src_coords[p_src][1])/h_y;
-             float pz = -std::floor((-o_z + src_coords[p_src][2])/h_z) + (-o_z + src_coords[p_src][2])/h_z;
-             if (rsrcx + posx >= x_m - 1 && rsrcy + posy >= y_m - 1 && rsrcz + posz >= z_m - 1 && rsrcx + posx <= x_M + 1 && rsrcy + posy <= y_M + 1 && rsrcz + posz <= z_M + 1)
-             {
-               float r0 = 1.0e-2F*(rsrcx*px + (1 - rsrcx)*(1 - px))*(rsrcy*py + (1 - rsrcy)*(1 - py))*(rsrcz*pz + (1 - rsrcz)*(1 - pz))*src[time][p_src]/m[posx + 4][posy + 4][posz + 4];
-               #pragma acc atomic update
-               u[t2][rsrcx + posx + 4][rsrcy + posy + 4][rsrcz + posz + 4] += r0;
-             }
-             }
-           }
-         }
-       }
-     }
-   }
-   STOP(section1,timers)
+   // SECTION 1 DISABLED: Source injection commented out for pure stencil benchmark
+   // START(section1)
+   // if (src_vec->size[0]*src_vec->size[1] > 0 && p_src_M - p_src_m + 1 > 0)
+   // {
+   //   #pragma acc parallel loop collapse(4) present(m,src,src_coords,u)
+   //   for (int p_src = p_src_m; p_src <= p_src_M; p_src += 1)
+   //   {
+   //     for (int rsrcx = 0; rsrcx <= 1; rsrcx += 1)
+   //     {
+   //       for (int rsrcy = 0; rsrcy <= 1; rsrcy += 1)
+   //       {
+   //         for (int rsrcz = 0; rsrcz <= 1; rsrcz += 1)
+   //         {
+   //           for (int i = 0; i < NREPEAT; ++i) {
+   //           int posx = static_cast<int>(std::floor((-o_x + src_coords[p_src][0])/h_x));
+   //           int posy = static_cast<int>(std::floor((-o_y + src_coords[p_src][1])/h_y));
+   //           int posz = static_cast<int>(std::floor((-o_z + src_coords[p_src][2])/h_z));
+   //           //
+   //           float px = -std::floor((-o_x + src_coords[p_src][0])/h_x) + (-o_x + src_coords[p_src][0])/h_x;
+   //           float py = -std::floor((-o_y + src_coords[p_src][1])/h_y) + (-o_y + src_coords[p_src][1])/h_y;
+   //           float pz = -std::floor((-o_z + src_coords[p_src][2])/h_z) + (-o_z + src_coords[p_src][2])/h_z;
+   //           if (rsrcx + posx >= x_m - 1 && rsrcy + posy >= y_m - 1 && rsrcz + posz >= z_m - 1 && rsrcx + posx <= x_M + 1 && rsrcy + posy <= y_M + 1 && rsrcz + posz <= z_M + 1)
+   //           {
+   //             float r0 = 1.0e-2F*(rsrcx*px + (1 - rsrcx)*(1 - px))*(rsrcy*py + (1 - rsrcy)*(1 - py))*(rsrcz*pz + (1 - rsrcz)*(1 - pz))*src[time][p_src]/m[posx + 4][posy + 4][posz + 4];
+   //             #pragma acc atomic update
+   //             u[t2][rsrcx + posx + 4][rsrcy + posy + 4][rsrcz + posz + 4] += r0;
+   //           }
+   //           }
+   //         }
+   //       }
+   //     }
+   //   }
+   // }
+   // STOP(section1,timers)
  }
 
 

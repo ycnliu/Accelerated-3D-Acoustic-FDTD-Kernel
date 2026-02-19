@@ -243,24 +243,25 @@ extern "C" int Kernel_CUDA(
         dt, r1, r2, r3, r4);
     cudaDeviceSynchronize();
 
-    if (p_src_M >= p_src_m) {
-      const int nsrc = (p_src_M - p_src_m + 1);
-      const int threads_src = 256;
-      const int blocks_src = (nsrc + threads_src - 1) / threads_src;
-      const int pstride = src_vec->size[1];
-      const int cstride = src_coords_vec->size[1];
-
-      source_inject_kernel<<<blocks_src, threads_src>>>(
-          d_m, d_src, d_src_coords, d_u,
-          nxp, nyp, nzp,
-          x_m, x_M, y_m, y_M, z_m, z_M,
-          t2,
-          h_x, h_y, h_z,
-          o_x, o_y, o_z,
-          p_src_m, p_src_M, t,
-          pstride, cstride);
-      cudaDeviceSynchronize();
-    }
+    // SECTION 1 DISABLED: Source injection commented out for pure stencil benchmark
+    // if (p_src_M >= p_src_m) {
+    //   const int nsrc = (p_src_M - p_src_m + 1);
+    //   const int threads_src = 256;
+    //   const int blocks_src = (nsrc + threads_src - 1) / threads_src;
+    //   const int pstride = src_vec->size[1];
+    //   const int cstride = src_coords_vec->size[1];
+    //
+    //   source_inject_kernel<<<blocks_src, threads_src>>>(
+    //       d_m, d_src, d_src_coords, d_u,
+    //       nxp, nyp, nzp,
+    //       x_m, x_M, y_m, y_M, z_m, z_M,
+    //       t2,
+    //       h_x, h_y, h_z,
+    //       o_x, o_y, o_z,
+    //       p_src_m, p_src_M, t,
+    //       pstride, cstride);
+    //   cudaDeviceSynchronize();
+    // }
   }
 
   // Timed loop - starts after warmup
@@ -285,32 +286,33 @@ extern "C" int Kernel_CUDA(
     cudaDeviceSynchronize();
     STOP_SEC(section0, timers);
 
-    if (p_src_M >= p_src_m) {
-      const int nsrc = (p_src_M - p_src_m + 1);
-      const int threads_src = 256;
-      const int blocks_src = (nsrc + threads_src - 1) / threads_src;
-
-      const int pstride = src_vec->size[1];
-      const int cstride = src_coords_vec->size[1];
-
-      START_SEC(section1)
-      source_inject_kernel<<<blocks_src, threads_src>>>(
-          d_m, d_src, d_src_coords, d_u,
-          nxp, nyp, nzp,
-          x_m, x_M, y_m, y_M, z_m, z_M,
-          t2,
-          h_x, h_y, h_z,
-          o_x, o_y, o_z,
-          p_src_m, p_src_M, t,
-          pstride, cstride);
-      cudaError_t err = cudaGetLastError();
-      if (err != cudaSuccess) {
-        cudaFree(d_u); cudaFree(d_m); cudaFree(d_src); cudaFree(d_src_coords);
-        return err;
-      }
-      cudaDeviceSynchronize();
-      STOP_SEC(section1, timers);
-    }
+    // SECTION 1 DISABLED: Source injection commented out for pure stencil benchmark
+    // if (p_src_M >= p_src_m) {
+    //   const int nsrc = (p_src_M - p_src_m + 1);
+    //   const int threads_src = 256;
+    //   const int blocks_src = (nsrc + threads_src - 1) / threads_src;
+    //
+    //   const int pstride = src_vec->size[1];
+    //   const int cstride = src_coords_vec->size[1];
+    //
+    //   START_SEC(section1)
+    //   source_inject_kernel<<<blocks_src, threads_src>>>(
+    //       d_m, d_src, d_src_coords, d_u,
+    //       nxp, nyp, nzp,
+    //       x_m, x_M, y_m, y_M, z_m, z_M,
+    //       t2,
+    //       h_x, h_y, h_z,
+    //       o_x, o_y, o_z,
+    //       p_src_m, p_src_M, t,
+    //       pstride, cstride);
+    //   cudaError_t err = cudaGetLastError();
+    //   if (err != cudaSuccess) {
+    //     cudaFree(d_u); cudaFree(d_m); cudaFree(d_src); cudaFree(d_src_coords);
+    //     return err;
+    //   }
+    //   cudaDeviceSynchronize();
+    //   STOP_SEC(section1, timers);
+    // }
   }
 
   // Copy back to host
