@@ -347,24 +347,36 @@ extern "C" int Kernel_CUDA_Optimized(
   if (ext_x <= 0 || ext_y <= 0 || ext_z <= 0) return cudaErrorInvalidValue;
 
   // Set L2 cache persistence for shadow buffers (H100 has 50MB L2)
+  // Strategy: Persist the "current" field (t0) which is heavily read by stencil.
+  // The "previous" field (t1) is read once per output, and t2 is write-only.
   int l2_cache_size_int = 0;
   cudaError_t l2_err = cudaDeviceGetAttribute(&l2_cache_size_int, cudaDevAttrL2CacheSize, deviceid >= 0 ? deviceid : 0);
+  cudaError_t limit_err = cudaErrorNotSupported;
+  size_t persist_size = 0;
+  size_t window_bytes = 0;
+
   if (l2_err == cudaSuccess && l2_cache_size_int > 0) {
     size_t l2_cache_size = (size_t)l2_cache_size_int;
-    size_t persist_size = min(l2_cache_size, (size_t)(40 * 1024 * 1024));  // Use up to 40MB
-    cudaError_t limit_err = cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, persist_size);
+    persist_size = min(l2_cache_size / 2, (size_t)(40 * 1024 * 1024));  // Reserve up to 40MB
+    limit_err = cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, persist_size);
 
-    // Set persistence window for each shadow buffer separately (they're separate allocations)
     if (limit_err == cudaSuccess) {
-      for (int i = 0; i < 3; ++i) {
-        cudaStreamAttrValue stream_attr = {};
-        stream_attr.accessPolicyWindow.base_ptr = d_shadow[i];
-        stream_attr.accessPolicyWindow.num_bytes = nPerLevel * sizeof(float);
-        stream_attr.accessPolicyWindow.hitRatio = 1.0f;  // Maximum persistence
-        stream_attr.accessPolicyWindow.hitProp = cudaAccessPropertyPersisting;
-        stream_attr.accessPolicyWindow.missProp = cudaAccessPropertyStreaming;
-        cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &stream_attr);
-      }
+      // Bound window size to persist limit (avoid setting 1.8GB window on 40MB limit)
+      size_t field_size = nPerLevel * sizeof(float);
+      window_bytes = min(field_size, persist_size);
+
+      // Set initial persistence window on d_shadow[0]
+      // This will be updated each timestep to track t0 as it rotates
+      cudaStreamAttrValue stream_attr = {};
+      stream_attr.accessPolicyWindow.base_ptr = d_shadow[0];
+      stream_attr.accessPolicyWindow.num_bytes = window_bytes;
+      stream_attr.accessPolicyWindow.hitRatio = 1.0f;
+      stream_attr.accessPolicyWindow.hitProp = cudaAccessPropertyPersisting;
+      stream_attr.accessPolicyWindow.missProp = cudaAccessPropertyStreaming;
+      cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &stream_attr);
+
+      printf("[CUDA_Optimized] L2 persistence enabled: %zu MB window (limit: %zu MB)\n",
+             window_bytes / (1024*1024), persist_size / (1024*1024));
     }
   }
 
@@ -401,6 +413,18 @@ extern "C" int Kernel_CUDA_Optimized(
   // Warmup iterations to initialize GPU caches and ensure stable timing
   for (int time=time_m; time<time_m+WARMUP_STEPS && time<=time_M; ++time){
     const int t0 = time % 3, t1 = (time + 2) % 3, t2 = (time + 1) % 3;
+
+    // Update L2 persistence window to track current field (t0) during warmup
+    if (limit_err == cudaSuccess && window_bytes > 0) {
+      cudaStreamAttrValue stream_attr = {};
+      stream_attr.accessPolicyWindow.base_ptr = d_shadow[t0];
+      stream_attr.accessPolicyWindow.num_bytes = window_bytes;
+      stream_attr.accessPolicyWindow.hitRatio = 1.0f;
+      stream_attr.accessPolicyWindow.hitProp = cudaAccessPropertyPersisting;
+      stream_attr.accessPolicyWindow.missProp = cudaAccessPropertyStreaming;
+      cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &stream_attr);
+    }
+
     float* u_t0_shadow = d_shadow[t0];
     float* u_t1_shadow = d_shadow[t1];
     float* u_t2_output = d_shadow[t2];
@@ -435,6 +459,17 @@ extern "C" int Kernel_CUDA_Optimized(
 
   for (int time=time_m+WARMUP_STEPS; time<=time_M; ++time){
     const int t0 = time % 3, t1 = (time + 2) % 3, t2 = (time + 1) % 3;
+
+    // Update L2 persistence window to track current field (t0) as it rotates
+    if (limit_err == cudaSuccess && window_bytes > 0) {
+      cudaStreamAttrValue stream_attr = {};
+      stream_attr.accessPolicyWindow.base_ptr = d_shadow[t0];
+      stream_attr.accessPolicyWindow.num_bytes = window_bytes;
+      stream_attr.accessPolicyWindow.hitRatio = 1.0f;
+      stream_attr.accessPolicyWindow.hitProp = cudaAccessPropertyPersisting;
+      stream_attr.accessPolicyWindow.missProp = cudaAccessPropertyStreaming;
+      cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &stream_attr);
+    }
 
     // Shadow buffers: read t0 (current) and t1 (previous), write t2 (new)
     float* u_t0_shadow = d_shadow[t0];
